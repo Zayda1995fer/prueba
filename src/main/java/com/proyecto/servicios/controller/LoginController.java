@@ -1,7 +1,5 @@
 package com.proyecto.servicios.controller;
 
-package com.proyecto.servicios.controller;
-
 import com.proyecto.servicios.model.onboarding.LoginRegistroRequest;
 import com.proyecto.servicios.model.onboarding.LoginRequest;
 import com.proyecto.servicios.model.onboarding.LoginResponse;
