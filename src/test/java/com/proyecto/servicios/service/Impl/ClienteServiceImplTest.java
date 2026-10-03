@@ -47,6 +47,7 @@ class ClienteServiceImplTest {
     @BeforeEach
     void setUp() {
         clienteService = new ClienteServiceImpl(clienteRepository, domicilioRepository, cuentaRepository);
+        // @Value no se inyecta fuera de un contexto Spring; se fija a mano para la prueba
         ReflectionTestUtils.setField(clienteService, "saldoInicial", new BigDecimal("0.00"));
     }
 
@@ -56,13 +57,16 @@ class ClienteServiceImplTest {
         request.setApellidoPaterno("Garcia");
         request.setApellidoMaterno("Lopez");
         request.setFechaNacimiento(LocalDate.of(1990, 1, 1));
-        request.setCurp("GARC800101HDFRRL01");
-        request.setRfc("GARC800101AB1");
+        // CURP/RFC construidas con el algoritmo real a partir de los datos
+        // de arriba (Garcia=>G+A de "arcia", Lopez=>L, Juan=>J, 1990-01-01,
+        // sexo H), para que pasen la nueva validación de coincidencia.
+        request.setCurp("GALJ900101HDFRPN01");
+        request.setRfc("GALJ900101A01");
         request.setSexo("H");
         request.setNacionalidad("Mexicana");
         request.setEstadoCivil("Soltero");
         request.setCorreoElectronico("juan.garcia@correo.com");
-        request.setTelefonoMovil("5512345678");
+        request.setTelefonoMovil(5512345678L);
         request.setOcupacion("Ingeniero");
         request.setEmpresa("ACME");
         request.setIngresoMensual(new BigDecimal("15000.00"));

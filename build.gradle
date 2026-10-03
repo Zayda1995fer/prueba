@@ -49,6 +49,11 @@ dependencies {
     implementation 'io.jsonwebtoken:jjwt-api:0.12.6'
     implementation 'com.auth0:jwks-rsa:0.22.1'
     implementation 'com.auth0:java-jwt:4.4.0'
+    // Solo el módulo de hashing (BCrypt) para encriptar contraseñas del
+    // login de clientes; no se agrega spring-boot-starter-security
+    // completo porque este proyecto no requiere proteger endpoints con
+    // Spring Security, solo necesita un algoritmo de hash confiable.
+    implementation 'org.springframework.security:spring-security-crypto:6.3.4'
     //Utilerias Apache Commons
     implementation 'org.apache.commons:commons-lang3:3.12.0'
     implementation 'commons-fileupload:commons-fileupload:1.5'
@@ -67,15 +72,15 @@ dependencies {
     implementation 'jakarta.xml.bind:jakarta.xml.bind-api:4.0.0'
     //Soporte adicional  herramientas de desarrollo
     implementation 'org.apache.opennlp:opennlp-tools:2.2.0'
-    implementation 'org.projectlombok:lombok:1.18.26'
+    implementation 'org.projectlombok:lombok:1.18.34'
 
     developmentOnly 'org.springframework.boot:spring-boot-devtools'
-    compileOnly 'org.projectlombok:lombok:1.18.26'
-    annotationProcessor 'org.projectlombok:lombok:1.18.26'
+    compileOnly 'org.projectlombok:lombok:1.18.34'
+    annotationProcessor 'org.projectlombok:lombok:1.18.34'
     annotationProcessor 'org.projectlombok:lombok-mapstruct-binding:0.2.0'
     annotationProcessor 'org.mapstruct:mapstruct-processor:1.6.3'
-    testCompileOnly 'org.projectlombok:lombok:1.18.26'
-    testAnnotationProcessor 'org.projectlombok:lombok:1.18.26'
+    testCompileOnly 'org.projectlombok:lombok:1.18.34'
+    testAnnotationProcessor 'org.projectlombok:lombok:1.18.34'
 
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
     testImplementation 'org.mockito:mockito-inline:5.1.1'

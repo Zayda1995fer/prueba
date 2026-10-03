@@ -8,6 +8,10 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 
+/**
+ * Cliente persona física.
+ * Refleja la tabla "clientes" creada en V2__create_onboarding_clientes.sql.
+ */
 @Entity
 @Table(name = "clientes")
 @Getter
@@ -33,6 +37,8 @@ public class Cliente {
     @Column(name = "fecha_nacimiento", nullable = false)
     private LocalDate fechaNacimiento;
 
+    // CURP y RFC nunca se modifican una vez creado el cliente (regla de negocio);
+    // por eso el servicio, no la entidad, es responsable de no tocarlos en un update.
     @Column(name = "curp", nullable = false, unique = true)
     private String curp;
 
@@ -52,10 +58,10 @@ public class Cliente {
     private String correoElectronico;
 
     @Column(name = "telefono_movil", nullable = false)
-    private String telefonoMovil;
+    private Long telefonoMovil;
 
     @Column(name = "telefono_alternativo")
-    private String telefonoAlternativo;
+    private Long telefonoAlternativo;
 
     @Column(name = "ocupacion", nullable = false)
     private String ocupacion;
@@ -66,6 +72,7 @@ public class Cliente {
     @Column(name = "ingreso_mensual", nullable = false)
     private BigDecimal ingresoMensual;
 
+    // Baja lógica: nunca se borra un cliente físicamente, solo se marca activo = false
     @Column(name = "activo", nullable = false)
     private Boolean activo = true;
 

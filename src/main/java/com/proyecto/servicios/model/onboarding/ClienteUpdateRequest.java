@@ -8,28 +8,33 @@ import lombok.Setter;
 
 import java.math.BigDecimal;
 
+/**
+ * Datos permitidos para actualizar un cliente.
+ */
 @Getter
 @Setter
 @NoArgsConstructor
 public class ClienteUpdateRequest {
 
+    // --- Datos personales ---
+
     @NotBlank(message = "El nombre es obligatorio")
-    @Pattern(regexp = "^[A-Za-zÁÉÍÓÚÑáéíóúñ ]{2,50}$",
-            message = "El nombre solo debe contener letras y espacios, entre 2 y 50 caracteres")
+    @Pattern(regexp = "^[A-Za-zÁÉÍÓÚÑáéíóúñ ]{3,40}$",
+            message = "El nombre solo debe contener letras y espacios, entre 3 y 40 caracteres")
     private String nombre;
 
-    @Pattern(regexp = "^$|^[A-Za-zÁÉÍÓÚÑáéíóúñ ]{2,50}$",
-            message = "El segundo nombre solo debe contener letras y espacios, entre 2 y 50 caracteres")
+    @Pattern(regexp = "^$|^[A-Za-zÁÉÍÓÚÑáéíóúñ ]{3,40}$",
+            message = "El segundo nombre solo debe contener letras y espacios, entre 3 y 40 caracteres")
     private String segundoNombre;
 
     @NotBlank(message = "El apellido paterno es obligatorio")
-    @Pattern(regexp = "^[A-Za-zÁÉÍÓÚÑáéíóúñ ]{2,50}$",
-            message = "El apellido paterno solo debe contener letras y espacios, entre 2 y 50 caracteres")
+    @Pattern(regexp = "^[A-Za-zÁÉÍÓÚÑáéíóúñ ]{3,40}$",
+            message = "El apellido paterno solo debe contener letras y espacios, entre 3 y 40 caracteres")
     private String apellidoPaterno;
 
     @NotBlank(message = "El apellido materno es obligatorio")
-    @Pattern(regexp = "^[A-Za-zÁÉÍÓÚÑáéíóúñ ]{2,50}$",
-            message = "El apellido materno solo debe contener letras y espacios, entre 2 y 50 caracteres")
+    @Pattern(regexp = "^[A-Za-zÁÉÍÓÚÑáéíóúñ ]{3,40}$",
+            message = "El apellido materno solo debe contener letras y espacios, entre 3 y 40 caracteres")
     private String apellidoMaterno;
 
     @NotBlank(message = "El sexo es obligatorio")
@@ -41,21 +46,31 @@ public class ClienteUpdateRequest {
     @NotBlank(message = "El estado civil es obligatorio")
     private String estadoCivil;
 
+    // --- Datos de contacto ---
+
     @NotBlank(message = "El correo electrónico es obligatorio")
     @Email(message = "El correo electrónico no tiene un formato válido")
     @Size(max = 100, message = "El correo electrónico no debe exceder 100 caracteres")
     private String correoElectronico;
 
-    @NotBlank(message = "El teléfono móvil es obligatorio")
-    @Pattern(regexp = "^[0-9]{10}$", message = "El teléfono móvil debe contener exactamente 10 dígitos")
-    private String telefonoMovil;
+    @NotNull(message = "El teléfono móvil es obligatorio")
+    @Digits(integer = 10, fraction = 0, message = "El teléfono móvil debe contener exactamente 10 dígitos")
+    @Min(value = 1_000_000_000L, message = "El teléfono móvil debe contener exactamente 10 dígitos")
+    @Max(value = 9_999_999_999L, message = "El teléfono móvil debe contener exactamente 10 dígitos")
+    private Long telefonoMovil;
 
-    @Pattern(regexp = "^$|^[0-9]{10}$", message = "El teléfono alternativo debe contener exactamente 10 dígitos")
-    private String telefonoAlternativo;
+    @Digits(integer = 10, fraction = 0, message = "El teléfono alternativo debe contener exactamente 10 dígitos")
+    @Min(value = 1_000_000_000L, message = "El teléfono alternativo debe contener exactamente 10 dígitos")
+    @Max(value = 9_999_999_999L, message = "El teléfono alternativo debe contener exactamente 10 dígitos")
+    private Long telefonoAlternativo;
+
+    // --- Domicilio ---
 
     @NotNull(message = "El domicilio es obligatorio")
     @Valid
     private DomicilioRequest domicilio;
+
+    // --- Información laboral ---
 
     @NotBlank(message = "La ocupación es obligatoria")
     private String ocupacion;
