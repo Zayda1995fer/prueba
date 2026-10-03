@@ -13,6 +13,7 @@ import com.proyecto.servicios.repositorys.onboarding.ClienteRepository;
 import com.proyecto.servicios.repositorys.onboarding.CuentaRepository;
 import com.proyecto.servicios.repositorys.onboarding.DomicilioRepository;
 import com.proyecto.servicios.service.ClienteService;
+import com.proyecto.servicios.util.CurpRfcValidator;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -35,6 +36,10 @@ public class ClienteServiceImpl implements ClienteService {
     private final DomicilioRepository domicilioRepository;
     private final CuentaRepository cuentaRepository;
 
+    // Saldo con el que el sistema abre toda cuenta nueva. Se deja como
+    // propiedad configurable (application.properties) en vez de un
+    // número fijo en el código, siguiendo la misma idea que ya usaba
+    // el proyecto con gestopago.auth.refresh-rate-ms.
     @Value("${app.cuenta.saldo-inicial:0.00}")
     private BigDecimal saldoInicial;
 
@@ -51,6 +56,7 @@ public class ClienteServiceImpl implements ClienteService {
         log.info("Iniciando registro de cliente, curp={}", request.getCurp());
 
         validarMayoriaDeEdad(request.getFechaNacimiento());
+        validarCurpYRfcCoincidenConDatos(request);
         validarNoDuplicado(request);
 
         Cliente cliente = new Cliente();
@@ -76,6 +82,7 @@ public class ClienteServiceImpl implements ClienteService {
         Domicilio domicilio = mapearDomicilio(request.getDomicilio(), cliente.getId());
         domicilio = domicilioRepository.save(domicilio);
 
+        // "Creación automática de cuenta" al registrar correctamente al cliente
         Cuenta cuenta = crearCuentaParaCliente(cliente.getId());
 
         log.info("Registro de cliente finalizado, clienteId={}, numeroCuenta={}",
@@ -150,6 +157,8 @@ public class ClienteServiceImpl implements ClienteService {
 
         Cliente cliente = obtenerClienteOLanzar(id);
 
+        // CURP, RFC y número de cuenta nunca se tocan aquí: el DTO de
+        // actualización ni siquiera trae esos campos.
         cliente.setNombre(request.getNombre());
         cliente.setSegundoNombre(request.getSegundoNombre());
         cliente.setApellidoPaterno(request.getApellidoPaterno());
@@ -161,6 +170,7 @@ public class ClienteServiceImpl implements ClienteService {
         cliente.setEmpresa(request.getEmpresa());
         cliente.setIngresoMensual(request.getIngresoMensual());
 
+        // El correo sí se puede actualizar, pero sigue debiendo ser único
         if (!cliente.getCorreoElectronico().equalsIgnoreCase(request.getCorreoElectronico())
                 && clienteRepository.existsByCorreoElectronico(request.getCorreoElectronico())) {
             throw new ClienteYaRegistradoException(
@@ -191,6 +201,7 @@ public class ClienteServiceImpl implements ClienteService {
         cliente.setActivo(false);
         clienteRepository.save(cliente);
 
+        // Regla de negocio: "Solo los clientes activos podrán tener cuentas activas"
         cuentaRepository.findByClienteId(id).ifPresent(cuenta -> {
             cuenta.setEstatus(Cuenta.ESTATUS_INACTIVA);
             cuentaRepository.save(cuenta);
@@ -199,11 +210,27 @@ public class ClienteServiceImpl implements ClienteService {
         log.info("Baja lógica de cliente finalizada, clienteId={}", id);
     }
 
+    // ------------------------------------------------------------------
+    // Métodos de apoyo (privados): aquí se evita repetir código entre
+    // los distintos métodos públicos de arriba.
+    // ------------------------------------------------------------------
+
     private void validarMayoriaDeEdad(LocalDate fechaNacimiento) {
         int edad = Period.between(fechaNacimiento, LocalDate.now()).getYears();
         if (edad < EDAD_MINIMA) {
             throw new ValidacionException("El cliente debe ser mayor de edad (18 años o más)");
         }
+    }
+
+    private void validarCurpYRfcCoincidenConDatos(ClienteRequest request) {
+        CurpRfcValidator.validar(
+                request.getNombre(),
+                request.getApellidoPaterno(),
+                request.getApellidoMaterno(),
+                request.getFechaNacimiento(),
+                request.getSexo(),
+                request.getCurp(),
+                request.getRfc());
     }
 
     private void validarNoDuplicado(ClienteRequest request) {
@@ -221,6 +248,8 @@ public class ClienteServiceImpl implements ClienteService {
 
     private Cuenta crearCuentaParaCliente(Integer clienteId) {
         if (saldoInicial.compareTo(BigDecimal.ZERO) < 0) {
+            // Defensa adicional: el saldo inicial tampoco puede ser negativo,
+            // ni siquiera si alguien cambia mal la configuración.
             throw new ValidacionException("El saldo inicial configurado no puede ser negativo");
         }
 
@@ -235,6 +264,7 @@ public class ClienteServiceImpl implements ClienteService {
     private String generarNumeroCuentaUnico() {
         String numeroCuenta;
         do {
+            // 10 dígitos numéricos, igual que un número de cuenta bancario simple
             numeroCuenta = String.format("%010d", Math.abs(RANDOM.nextLong() % 10_000_000_000L));
         } while (cuentaRepository.existsByNumeroCuenta(numeroCuenta));
         return numeroCuenta;
@@ -311,6 +341,9 @@ public class ClienteServiceImpl implements ClienteService {
         return response;
     }
 
+    // Método estático (sin estado) para que CuentaServiceImpl también lo
+    // use y así no se repita esta conversión Cuenta -> CuentaResponse
+    // en dos archivos distintos.
     public static CuentaResponse mapearCuenta(Cuenta cuenta) {
         CuentaResponse cuentaResponse = new CuentaResponse();
         cuentaResponse.setId(cuenta.getId());
