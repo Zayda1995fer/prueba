@@ -8,6 +8,11 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 
+/**
+ * Lo que el API le regresa al cliente que consulta. Incluye el domicilio
+ * y la cuenta ya "armados" para no obligar a quien consuma el API a
+ * hacer dos llamadas extra.
+ */
 @Getter
 @Setter
 @NoArgsConstructor
@@ -25,8 +30,8 @@ public class ClienteResponse {
     private String nacionalidad;
     private String estadoCivil;
     private String correoElectronico;
-    private String telefonoMovil;
-    private String telefonoAlternativo;
+    private Long telefonoMovil;
+    private Long telefonoAlternativo;
     private String ocupacion;
     private String empresa;
     private BigDecimal ingresoMensual;
