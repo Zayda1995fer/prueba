@@ -3,6 +3,7 @@ package com.proyecto.servicios.service.Impl;
 import com.proyecto.servicios.entity.onboarding.Cliente;
 import com.proyecto.servicios.entity.onboarding.Cuenta;
 import com.proyecto.servicios.entity.onboarding.Domicilio;
+import com.proyecto.servicios.entity.onboarding.Nacionalidad;
 import com.proyecto.servicios.exception.ClienteNoEncontradoException;
 import com.proyecto.servicios.exception.CurpDuplicadaException;
 import com.proyecto.servicios.exception.RfcDuplicadoException;
@@ -12,6 +13,7 @@ import com.proyecto.servicios.model.onboarding.*;
 import com.proyecto.servicios.repositorys.onboarding.ClienteRepository;
 import com.proyecto.servicios.repositorys.onboarding.CuentaRepository;
 import com.proyecto.servicios.repositorys.onboarding.DomicilioRepository;
+import com.proyecto.servicios.repositorys.onboarding.NacionalidadRepository;
 import com.proyecto.servicios.service.ClienteService;
 import com.proyecto.servicios.util.CurpRfcValidator;
 import lombok.extern.slf4j.Slf4j;
@@ -19,6 +21,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.security.SecureRandom;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -35,6 +38,7 @@ public class ClienteServiceImpl implements ClienteService {
     private final ClienteRepository clienteRepository;
     private final DomicilioRepository domicilioRepository;
     private final CuentaRepository cuentaRepository;
+    private final NacionalidadRepository nacionalidadRepository;
 
     // Saldo con el que el sistema abre toda cuenta nueva. Se deja como
     // propiedad configurable (application.properties) en vez de un
@@ -45,10 +49,12 @@ public class ClienteServiceImpl implements ClienteService {
 
     public ClienteServiceImpl(ClienteRepository clienteRepository,
                               DomicilioRepository domicilioRepository,
-                              CuentaRepository cuentaRepository) {
+                              CuentaRepository cuentaRepository,
+                              NacionalidadRepository nacionalidadRepository) {
         this.clienteRepository = clienteRepository;
         this.domicilioRepository = domicilioRepository;
         this.cuentaRepository = cuentaRepository;
+        this.nacionalidadRepository = nacionalidadRepository;
     }
 
     @Override
@@ -58,6 +64,7 @@ public class ClienteServiceImpl implements ClienteService {
         validarMayoriaDeEdad(request.getFechaNacimiento());
         validarCurpYRfcCoincidenConDatos(request);
         validarNoDuplicado(request);
+        validarNacionalidadExiste(request.getNacionalidadId());
 
         Cliente cliente = new Cliente();
         cliente.setNombre(request.getNombre());
@@ -68,14 +75,14 @@ public class ClienteServiceImpl implements ClienteService {
         cliente.setCurp(request.getCurp());
         cliente.setRfc(request.getRfc());
         cliente.setSexo(request.getSexo());
-        cliente.setNacionalidad(request.getNacionalidad());
+        cliente.setNacionalidadId(request.getNacionalidadId());
         cliente.setEstadoCivil(request.getEstadoCivil());
         cliente.setCorreoElectronico(request.getCorreoElectronico());
         cliente.setTelefonoMovil(request.getTelefonoMovil());
         cliente.setTelefonoAlternativo(request.getTelefonoAlternativo());
         cliente.setOcupacion(request.getOcupacion());
         cliente.setEmpresa(request.getEmpresa());
-        cliente.setIngresoMensual(request.getIngresoMensual());
+        cliente.setIngresoMensual(normalizarMonto(request.getIngresoMensual()));
         cliente.setActivo(true);
         cliente = clienteRepository.save(cliente);
 
@@ -157,6 +164,8 @@ public class ClienteServiceImpl implements ClienteService {
 
         Cliente cliente = obtenerClienteOLanzar(id);
 
+        validarNacionalidadExiste(request.getNacionalidadId());
+
         // CURP, RFC y número de cuenta nunca se tocan aquí: el DTO de
         // actualización ni siquiera trae esos campos.
         cliente.setNombre(request.getNombre());
@@ -164,11 +173,11 @@ public class ClienteServiceImpl implements ClienteService {
         cliente.setApellidoPaterno(request.getApellidoPaterno());
         cliente.setApellidoMaterno(request.getApellidoMaterno());
         cliente.setSexo(request.getSexo());
-        cliente.setNacionalidad(request.getNacionalidad());
+        cliente.setNacionalidadId(request.getNacionalidadId());
         cliente.setEstadoCivil(request.getEstadoCivil());
         cliente.setOcupacion(request.getOcupacion());
         cliente.setEmpresa(request.getEmpresa());
-        cliente.setIngresoMensual(request.getIngresoMensual());
+        cliente.setIngresoMensual(normalizarMonto(request.getIngresoMensual()));
 
         // El correo sí se puede actualizar, pero sigue debiendo ser único
         if (!cliente.getCorreoElectronico().equalsIgnoreCase(request.getCorreoElectronico())
@@ -231,6 +240,22 @@ public class ClienteServiceImpl implements ClienteService {
                 request.getSexo(),
                 request.getCurp(),
                 request.getRfc());
+    }
+
+    // "Que a la cantidad que se ingrese se le agregue por defecto .00":
+    // si capturan 15000 (sin decimales) o 15000.5, se guarda siempre con
+    // 2 decimales exactos (15000.00 / 15000.50). @Digits(fraction = 2)
+    // en el DTO ya rechaza algo como 15000.555 antes de llegar aquí.
+    private BigDecimal normalizarMonto(BigDecimal monto) {
+        return monto.setScale(2, RoundingMode.HALF_UP);
+    }
+
+    private void validarNacionalidadExiste(Integer nacionalidadId) {
+        if (!nacionalidadRepository.existsById(nacionalidadId)) {
+            throw new ValidacionException(
+                    "La nacionalidad indicada (id " + nacionalidadId
+                            + ") no existe en el catálogo. Consulta GET /nacionalidades para ver las nacionalidades disponibles.");
+        }
     }
 
     private void validarNoDuplicado(ClienteRequest request) {
@@ -299,6 +324,16 @@ public class ClienteServiceImpl implements ClienteService {
         domicilio.setPais(request.getPais());
     }
 
+    private NacionalidadResponse mapearNacionalidad(Integer nacionalidadId) {
+        Nacionalidad nacionalidad = nacionalidadRepository.findById(nacionalidadId)
+                .orElseThrow(() -> new ValidacionException(
+                        "El cliente tiene un nacionalidad_id (" + nacionalidadId + ") que ya no existe en el catálogo"));
+        NacionalidadResponse response = new NacionalidadResponse();
+        response.setId(nacionalidad.getId());
+        response.setNombre(nacionalidad.getNombre());
+        return response;
+    }
+
     private ClienteResponse mapearResponse(Cliente cliente, Domicilio domicilio, Cuenta cuenta) {
         ClienteResponse response = new ClienteResponse();
         response.setId(cliente.getId());
@@ -310,7 +345,7 @@ public class ClienteServiceImpl implements ClienteService {
         response.setCurp(cliente.getCurp());
         response.setRfc(cliente.getRfc());
         response.setSexo(cliente.getSexo());
-        response.setNacionalidad(cliente.getNacionalidad());
+        response.setNacionalidad(mapearNacionalidad(cliente.getNacionalidadId()));
         response.setEstadoCivil(cliente.getEstadoCivil());
         response.setCorreoElectronico(cliente.getCorreoElectronico());
         response.setTelefonoMovil(cliente.getTelefonoMovil());

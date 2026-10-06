@@ -48,8 +48,10 @@ public class Cliente {
     @Column(name = "sexo", nullable = false)
     private String sexo;
 
-    @Column(name = "nacionalidad", nullable = false)
-    private String nacionalidad;
+    // Ya no es texto libre: referencia al catálogo "nacionalidades"
+    // (ver V3__create_catalogo_nacionalidades.sql).
+    @Column(name = "nacionalidad_id", nullable = false)
+    private Integer nacionalidadId;
 
     @Column(name = "estado_civil", nullable = false)
     private String estadoCivil;

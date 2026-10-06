@@ -3,6 +3,7 @@ package com.proyecto.servicios.service.Impl;
 import com.proyecto.servicios.entity.onboarding.Cliente;
 import com.proyecto.servicios.entity.onboarding.Cuenta;
 import com.proyecto.servicios.entity.onboarding.Domicilio;
+import com.proyecto.servicios.entity.onboarding.Nacionalidad;
 import com.proyecto.servicios.exception.ClienteNoEncontradoException;
 import com.proyecto.servicios.exception.ClienteYaRegistradoException;
 import com.proyecto.servicios.exception.CurpDuplicadaException;
@@ -14,6 +15,7 @@ import com.proyecto.servicios.model.onboarding.DomicilioRequest;
 import com.proyecto.servicios.repositorys.onboarding.ClienteRepository;
 import com.proyecto.servicios.repositorys.onboarding.CuentaRepository;
 import com.proyecto.servicios.repositorys.onboarding.DomicilioRepository;
+import com.proyecto.servicios.repositorys.onboarding.NacionalidadRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -41,12 +43,14 @@ class ClienteServiceImplTest {
     private DomicilioRepository domicilioRepository;
     @Mock
     private CuentaRepository cuentaRepository;
+    @Mock
+    private NacionalidadRepository nacionalidadRepository;
 
     private ClienteServiceImpl clienteService;
 
     @BeforeEach
     void setUp() {
-        clienteService = new ClienteServiceImpl(clienteRepository, domicilioRepository, cuentaRepository);
+        clienteService = new ClienteServiceImpl(clienteRepository, domicilioRepository, cuentaRepository, nacionalidadRepository);
         // @Value no se inyecta fuera de un contexto Spring; se fija a mano para la prueba
         ReflectionTestUtils.setField(clienteService, "saldoInicial", new BigDecimal("0.00"));
     }
@@ -63,7 +67,7 @@ class ClienteServiceImplTest {
         request.setCurp("GALJ900101HDFRPN01");
         request.setRfc("GALJ900101A01");
         request.setSexo("H");
-        request.setNacionalidad("Mexicana");
+        request.setNacionalidadId(1);
         request.setEstadoCivil("Soltero");
         request.setCorreoElectronico("juan.garcia@correo.com");
         request.setTelefonoMovil(5512345678L);
@@ -89,6 +93,11 @@ class ClienteServiceImplTest {
         when(clienteRepository.existsByCurp(anyString())).thenReturn(false);
         when(clienteRepository.existsByRfc(anyString())).thenReturn(false);
         when(clienteRepository.existsByCorreoElectronico(anyString())).thenReturn(false);
+        Nacionalidad mexicana = new Nacionalidad();
+        mexicana.setId(1);
+        mexicana.setNombre("Mexicana");
+        when(nacionalidadRepository.existsById(1)).thenReturn(true);
+        when(nacionalidadRepository.findById(1)).thenReturn(Optional.of(mexicana));
         when(clienteRepository.save(any(Cliente.class))).thenAnswer(inv -> {
             Cliente c = inv.getArgument(0);
             c.setId(1);
@@ -105,6 +114,8 @@ class ClienteServiceImplTest {
         ClienteResponse response = clienteService.registrarCliente(solicitudValida());
 
         assertThat(response.getId()).isEqualTo(1);
+        assertThat(response.getNacionalidad()).isNotNull();
+        assertThat(response.getNacionalidad().getNombre()).isEqualTo("Mexicana");
         assertThat(response.getCuenta()).isNotNull();
         assertThat(response.getCuenta().getEstatus()).isEqualTo(Cuenta.ESTATUS_ACTIVA);
         assertThat(response.getCuenta().getNumeroCuenta()).hasSize(10);
@@ -151,6 +162,23 @@ class ClienteServiceImplTest {
 
         assertThatThrownBy(() -> clienteService.registrarCliente(solicitudValida()))
                 .isInstanceOf(ClienteYaRegistradoException.class);
+    }
+
+    @Test
+    void registrarCliente_nacionalidadNoExisteEnCatalogo_lanzaValidacionException() {
+        when(clienteRepository.existsByCurp(anyString())).thenReturn(false);
+        when(clienteRepository.existsByRfc(anyString())).thenReturn(false);
+        when(clienteRepository.existsByCorreoElectronico(anyString())).thenReturn(false);
+        when(nacionalidadRepository.existsById(999)).thenReturn(false);
+
+        ClienteRequest request = solicitudValida();
+        request.setNacionalidadId(999);
+
+        assertThatThrownBy(() -> clienteService.registrarCliente(request))
+                .isInstanceOf(ValidacionException.class)
+                .hasMessageContaining("catálogo");
+
+        verifyNoInteractions(cuentaRepository);
     }
 
     @Test

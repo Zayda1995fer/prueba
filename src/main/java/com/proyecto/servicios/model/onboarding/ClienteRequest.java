@@ -12,6 +12,11 @@ import java.time.LocalDate;
 /**
  * Datos que se capturan al dar de alta un cliente.
  * Todas las validaciones de "forma" (formato, longitud, obligatoriedad)
+ * viven aquí, en las anotaciones. Las validaciones que necesitan
+ * consultar la base de datos (CURP/RFC/correo duplicados) o hacer un
+ * cálculo (mayoría de edad) se hacen en ClienteServiceImpl, porque
+ * Bean Validation no puede, por sí solo, ir a preguntarle a la base de
+ * datos si un dato ya existe.
  */
 @Getter
 @Setter
@@ -62,12 +67,17 @@ public class ClienteRequest {
     private String rfc;
 
     @NotBlank(message = "El sexo es obligatorio")
+    @Pattern(regexp = "^[HM]$", message = "El sexo debe capturarse como \"H\" o \"M\"")
     private String sexo;
 
-    @NotBlank(message = "La nacionalidad es obligatoria")
-    private String nacionalidad;
+    // Ya no es texto libre: debe ser el id de una nacionalidad del
+    // catálogo (GET /nacionalidades).
+    @NotNull(message = "La nacionalidad es obligatoria")
+    private Integer nacionalidadId;
 
     @NotBlank(message = "El estado civil es obligatorio")
+    @Pattern(regexp = "^(Soltero\\(a\\)|Casado\\(a\\)|Divorciado\\(a\\)|Viudo\\(a\\)|Unión libre)$",
+            message = "El estado civil debe ser uno de: Soltero(a), Casado(a), Divorciado(a), Viudo(a), Unión libre")
     private String estadoCivil;
 
     // --- Datos de contacto ---
@@ -98,12 +108,21 @@ public class ClienteRequest {
     // --- Información laboral ---
 
     @NotBlank(message = "La ocupación es obligatoria")
+    @Pattern(regexp = "^[A-Za-zÁÉÍÓÚÑáéíóúñ ]{3,60}$",
+            message = "La ocupación solo debe contener letras y espacios, entre 3 y 60 caracteres")
     private String ocupacion;
 
     @NotBlank(message = "La empresa es obligatoria")
+    @Pattern(regexp = "^[A-Za-zÁÉÍÓÚÑáéíóúñ0-9 .,&'-]{2,80}$",
+            message = "La empresa solo puede contener letras, números, espacios y . , & ' -, entre 2 y 80 caracteres")
     private String empresa;
 
+    // fraction = 2: máximo 2 decimales (p. ej. 15000.5 o 15000.50 son
+    // válidos, 15000.555 no). El valor que sí pase esta validación se
+    // normaliza a exactamente 2 decimales (15000 -> 15000.00) en
+    // ClienteServiceImpl antes de guardarse.
     @NotNull(message = "El ingreso mensual es obligatorio")
     @DecimalMin(value = "0.01", message = "El ingreso mensual debe ser mayor a cero")
+    @Digits(integer = 10, fraction = 2, message = "El ingreso mensual admite máximo 2 decimales")
     private BigDecimal ingresoMensual;
 }
