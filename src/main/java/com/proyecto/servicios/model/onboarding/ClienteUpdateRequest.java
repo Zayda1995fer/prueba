@@ -10,13 +10,19 @@ import java.math.BigDecimal;
 
 /**
  * Datos permitidos para actualizar un cliente.
+ *
+ * A propósito NO incluye curp, rfc ni numeroCuenta: la regla de negocio
+ * dice que esos tres datos no se pueden modificar una vez creados. Al no
+ * existir el campo en este DTO, es físicamente imposible que alguien lo
+ * mande a actualizar por esta vía (no hace falta "ignorarlo" a mano en
+ * el servicio, el propio contrato del API ya lo impide).
  */
 @Getter
 @Setter
 @NoArgsConstructor
 public class ClienteUpdateRequest {
 
-    // --- Datos personales ---
+    // --- Datos personales (excepto CURP/RFC) ---
 
     @NotBlank(message = "El nombre es obligatorio")
     @Pattern(regexp = "^[A-Za-zÁÉÍÓÚÑáéíóúñ ]{3,40}$",
@@ -38,12 +44,17 @@ public class ClienteUpdateRequest {
     private String apellidoMaterno;
 
     @NotBlank(message = "El sexo es obligatorio")
+    @Pattern(regexp = "^[HM]$", message = "El sexo debe capturarse como \"H\" o \"M\"")
     private String sexo;
 
-    @NotBlank(message = "La nacionalidad es obligatoria")
-    private String nacionalidad;
+    // Ya no es texto libre: debe ser el id de una nacionalidad del
+    // catálogo (GET /nacionalidades).
+    @NotNull(message = "La nacionalidad es obligatoria")
+    private Integer nacionalidadId;
 
     @NotBlank(message = "El estado civil es obligatorio")
+    @Pattern(regexp = "^(Soltero\\(a\\)|Casado\\(a\\)|Divorciado\\(a\\)|Viudo\\(a\\)|Unión libre)$",
+            message = "El estado civil debe ser uno de: Soltero(a), Casado(a), Divorciado(a), Viudo(a), Unión libre")
     private String estadoCivil;
 
     // --- Datos de contacto ---
@@ -73,12 +84,17 @@ public class ClienteUpdateRequest {
     // --- Información laboral ---
 
     @NotBlank(message = "La ocupación es obligatoria")
+    @Pattern(regexp = "^[A-Za-zÁÉÍÓÚÑáéíóúñ ]{3,60}$",
+            message = "La ocupación solo debe contener letras y espacios, entre 3 y 60 caracteres")
     private String ocupacion;
 
     @NotBlank(message = "La empresa es obligatoria")
+    @Pattern(regexp = "^[A-Za-zÁÉÍÓÚÑáéíóúñ0-9 .,&'-]{2,80}$",
+            message = "La empresa solo puede contener letras, números, espacios y . , & ' -, entre 2 y 80 caracteres")
     private String empresa;
 
     @NotNull(message = "El ingreso mensual es obligatorio")
     @DecimalMin(value = "0.01", message = "El ingreso mensual debe ser mayor a cero")
+    @Digits(integer = 10, fraction = 2, message = "El ingreso mensual admite máximo 2 decimales")
     private BigDecimal ingresoMensual;
 }
