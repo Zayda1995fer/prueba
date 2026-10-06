@@ -8,10 +8,7 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 
-/**
- * Cliente persona física.
- * Refleja la tabla "clientes" creada en V2__create_onboarding_clientes.sql.
- */
+
 @Entity
 @Table(name = "clientes")
 @Getter
