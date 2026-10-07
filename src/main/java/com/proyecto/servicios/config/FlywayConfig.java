@@ -33,6 +33,13 @@ public class FlywayConfig {
                 .baselineOnMigrate(true)
                 .baselineVersion("0")
                 .load();
+        // Si el checksum guardado en flyway_schema_history ya no coincide
+        // con el archivo actual (p. ej. por saltos de línea distintos al
+        // editar en Windows), repair() actualiza el historial para que
+        // vuelva a coincidir con los archivos de db/migration tal como
+        // están ahora, sin borrar ni reaplicar nada. No hace nada si todo
+        // ya está en orden.
+        flyway.repair();
         flyway.migrate();
         return flyway;
     }
