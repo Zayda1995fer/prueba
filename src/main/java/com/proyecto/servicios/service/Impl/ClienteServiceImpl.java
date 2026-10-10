@@ -15,7 +15,10 @@ import com.proyecto.servicios.repositorys.onboarding.CuentaRepository;
 import com.proyecto.servicios.repositorys.onboarding.DomicilioRepository;
 import com.proyecto.servicios.repositorys.onboarding.NacionalidadRepository;
 import com.proyecto.servicios.service.ClienteService;
+import com.proyecto.servicios.model.onboarding.NacionalidadRequest;
 import com.proyecto.servicios.util.CurpRfcValidator;
+import com.proyecto.servicios.util.NacionalidadNombre;
+import com.proyecto.servicios.validation.ReglasValidacion;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -27,12 +30,14 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.Period;
 import java.util.List;
+import java.util.Locale;
 
 @Service
 @Slf4j
 public class ClienteServiceImpl implements ClienteService {
 
     private static final int EDAD_MINIMA = 18;
+    private static final int EDAD_MAXIMA = ReglasValidacion.EDAD_MAXIMA;
     private static final SecureRandom RANDOM = new SecureRandom();
 
     private final ClienteRepository clienteRepository;
@@ -61,10 +66,11 @@ public class ClienteServiceImpl implements ClienteService {
     public ClienteResponse registrarCliente(ClienteRequest request) {
         log.info("Iniciando registro de cliente, curp={}", request.getCurp());
 
-        validarMayoriaDeEdad(request.getFechaNacimiento());
+        validarEdad(request.getFechaNacimiento());
+        validarTelefonosDistintos(request.getTelefonoMovil(), request.getTelefonoAlternativo());
         validarCurpYRfcCoincidenConDatos(request);
         validarNoDuplicado(request);
-        validarNacionalidadExiste(request.getNacionalidadId());
+        Integer nacionalidadId = resolverNacionalidad(request.getNacionalidad());
 
         Cliente cliente = new Cliente();
         cliente.setNombre(request.getNombre());
@@ -75,7 +81,7 @@ public class ClienteServiceImpl implements ClienteService {
         cliente.setCurp(request.getCurp());
         cliente.setRfc(request.getRfc());
         cliente.setSexo(request.getSexo());
-        cliente.setNacionalidadId(request.getNacionalidadId());
+        cliente.setNacionalidadId(nacionalidadId);
         cliente.setEstadoCivil(request.getEstadoCivil());
         cliente.setCorreoElectronico(request.getCorreoElectronico());
         cliente.setTelefonoMovil(request.getTelefonoMovil());
@@ -95,7 +101,7 @@ public class ClienteServiceImpl implements ClienteService {
         log.info("Registro de cliente finalizado, clienteId={}, numeroCuenta={}",
                 cliente.getId(), cuenta.getNumeroCuenta());
 
-        return mapearResponse(cliente, domicilio, cuenta);
+        return mapearResponse(cliente, domicilio, cuenta, true);
     }
 
     @Override
@@ -113,21 +119,21 @@ public class ClienteServiceImpl implements ClienteService {
 
     @Override
     public ClienteResponse consultarPorCurp(String curp) {
-        Cliente cliente = clienteRepository.findByCurp(curp)
+        Cliente cliente = clienteRepository.findByCurp(curp.toUpperCase(Locale.ROOT))
                 .orElseThrow(() -> new ClienteNoEncontradoException("CURP " + curp));
         return armarResponseCompleto(cliente);
     }
 
     @Override
     public ClienteResponse consultarPorRfc(String rfc) {
-        Cliente cliente = clienteRepository.findByRfc(rfc)
+        Cliente cliente = clienteRepository.findByRfc(rfc.toUpperCase(Locale.ROOT))
                 .orElseThrow(() -> new ClienteNoEncontradoException("RFC " + rfc));
         return armarResponseCompleto(cliente);
     }
 
     @Override
     public ClienteResponse consultarPorCorreo(String correo) {
-        Cliente cliente = clienteRepository.findByCorreoElectronico(correo)
+        Cliente cliente = clienteRepository.findByCorreoElectronico(correo.toLowerCase(Locale.ROOT))
                 .orElseThrow(() -> new ClienteNoEncontradoException("correo " + correo));
         return armarResponseCompleto(cliente);
     }
@@ -138,7 +144,7 @@ public class ClienteServiceImpl implements ClienteService {
                 .orElseThrow(() -> new ClienteNoEncontradoException("cuenta " + numeroCuenta));
         Cliente cliente = obtenerClienteOLanzar(cuenta.getClienteId());
         Domicilio domicilio = domicilioRepository.findByClienteId(cliente.getId()).orElse(null);
-        return mapearResponse(cliente, domicilio, cuenta);
+        return mapearResponse(cliente, domicilio, cuenta, false);
     }
 
     @Override
@@ -164,7 +170,14 @@ public class ClienteServiceImpl implements ClienteService {
 
         Cliente cliente = obtenerClienteOLanzar(id);
 
-        validarNacionalidadExiste(request.getNacionalidadId());
+        Integer nacionalidadId = resolverNacionalidad(request.getNacionalidad());
+        validarTelefonosDistintos(request.getTelefonoMovil(), request.getTelefonoAlternativo());
+
+        // Al cambiar nombre, apellidos o sexo, la CURP y el RFC que ya tiene
+        // el cliente (que no se pueden modificar) deben seguir coincidiendo.
+        CurpRfcValidator.validar(
+                request.getNombre(), request.getApellidoPaterno(), request.getApellidoMaterno(),
+                cliente.getFechaNacimiento(), request.getSexo(), cliente.getCurp(), cliente.getRfc());
 
         // CURP, RFC y número de cuenta nunca se tocan aquí: el DTO de
         // actualización ni siquiera trae esos campos.
@@ -173,7 +186,7 @@ public class ClienteServiceImpl implements ClienteService {
         cliente.setApellidoPaterno(request.getApellidoPaterno());
         cliente.setApellidoMaterno(request.getApellidoMaterno());
         cliente.setSexo(request.getSexo());
-        cliente.setNacionalidadId(request.getNacionalidadId());
+        cliente.setNacionalidadId(nacionalidadId);
         cliente.setEstadoCivil(request.getEstadoCivil());
         cliente.setOcupacion(request.getOcupacion());
         cliente.setEmpresa(request.getEmpresa());
@@ -183,7 +196,8 @@ public class ClienteServiceImpl implements ClienteService {
         if (!cliente.getCorreoElectronico().equalsIgnoreCase(request.getCorreoElectronico())
                 && clienteRepository.existsByCorreoElectronico(request.getCorreoElectronico())) {
             throw new ClienteYaRegistradoException(
-                    "Ya existe un cliente registrado con el correo " + request.getCorreoElectronico());
+                    "Ya existe un cliente registrado con el correo " + request.getCorreoElectronico(),
+                    "correoElectronico");
         }
         cliente.setCorreoElectronico(request.getCorreoElectronico());
         cliente.setTelefonoMovil(request.getTelefonoMovil());
@@ -199,7 +213,7 @@ public class ClienteServiceImpl implements ClienteService {
         log.info("Actualización de cliente finalizada, clienteId={}", id);
 
         Cuenta cuenta = cuentaRepository.findByClienteId(id).orElse(null);
-        return mapearResponse(cliente, domicilio, cuenta);
+        return mapearResponse(cliente, domicilio, cuenta, true);
     }
 
     @Override
@@ -224,10 +238,23 @@ public class ClienteServiceImpl implements ClienteService {
     // los distintos métodos públicos de arriba.
     // ------------------------------------------------------------------
 
-    private void validarMayoriaDeEdad(LocalDate fechaNacimiento) {
+    private void validarEdad(LocalDate fechaNacimiento) {
         int edad = Period.between(fechaNacimiento, LocalDate.now()).getYears();
         if (edad < EDAD_MINIMA) {
-            throw new ValidacionException("El cliente debe ser mayor de edad (18 años o más)");
+            throw new ValidacionException("El cliente debe ser mayor de edad (18 años o más)", "fechaNacimiento");
+        }
+        if (edad > EDAD_MAXIMA) {
+            throw new ValidacionException(
+                    "La fecha de nacimiento no es válida: la edad no puede ser mayor a " + EDAD_MAXIMA + " años",
+                    "fechaNacimiento");
+        }
+    }
+
+    // Teléfono alternativo opcional, pero si se captura no puede ser el mismo número que el móvil
+    private void validarTelefonosDistintos(Long movil, Long alternativo) {
+        if (alternativo != null && alternativo.equals(movil)) {
+            throw new ValidacionException(
+                    "El teléfono alternativo no puede ser igual al teléfono móvil", "telefonoAlternativo");
         }
     }
 
@@ -250,12 +277,24 @@ public class ClienteServiceImpl implements ClienteService {
         return monto.setScale(2, RoundingMode.HALF_UP);
     }
 
-    private void validarNacionalidadExiste(Integer nacionalidadId) {
-        if (!nacionalidadRepository.existsById(nacionalidadId)) {
+    // La nacionalidad llega como arreglo de UN objeto {id, nombre}. Se valida que
+    // el id exista en el catálogo y que el nombre corresponda a ese id (acepta
+    // masculino/femenino, mayúsculas y acentos: Mexicana, Mexicano, MEXICANA).
+    private Integer resolverNacionalidad(List<NacionalidadRequest> nacionalidades) {
+        NacionalidadRequest capturada = nacionalidades.get(0);
+        Nacionalidad catalogo = nacionalidadRepository.findById(capturada.getId())
+                .orElseThrow(() -> new ValidacionException(
+                        "La nacionalidad indicada (id " + capturada.getId()
+                                + ") no existe en el catálogo. Consulta GET /nacionalidades para ver las nacionalidades disponibles.",
+                        "nacionalidad[0].id"));
+        if (!NacionalidadNombre.equivalentes(capturada.getNombre(), catalogo.getNombre())) {
             throw new ValidacionException(
-                    "La nacionalidad indicada (id " + nacionalidadId
-                            + ") no existe en el catálogo. Consulta GET /nacionalidades para ver las nacionalidades disponibles.");
+                    "El nombre de la nacionalidad \"" + capturada.getNombre() + "\" no corresponde al id "
+                            + capturada.getId() + " del catálogo (\"" + catalogo.getNombre()
+                            + "\"). Puede escribirse en masculino o femenino, sin importar mayúsculas ni acentos.",
+                    "nacionalidad[0].nombre");
         }
+        return catalogo.getId();
     }
 
     private void validarNoDuplicado(ClienteRequest request) {
@@ -267,7 +306,8 @@ public class ClienteServiceImpl implements ClienteService {
         }
         if (clienteRepository.existsByCorreoElectronico(request.getCorreoElectronico())) {
             throw new ClienteYaRegistradoException(
-                    "Ya existe un cliente registrado con el correo " + request.getCorreoElectronico());
+                    "Ya existe un cliente registrado con el correo " + request.getCorreoElectronico(),
+                    "correoElectronico");
         }
     }
 
@@ -303,7 +343,7 @@ public class ClienteServiceImpl implements ClienteService {
     private ClienteResponse armarResponseCompleto(Cliente cliente) {
         Domicilio domicilio = domicilioRepository.findByClienteId(cliente.getId()).orElse(null);
         Cuenta cuenta = cuentaRepository.findByClienteId(cliente.getId()).orElse(null);
-        return mapearResponse(cliente, domicilio, cuenta);
+        return mapearResponse(cliente, domicilio, cuenta, false);
     }
 
     private Domicilio mapearDomicilio(DomicilioRequest request, Integer clienteId) {
@@ -324,19 +364,22 @@ public class ClienteServiceImpl implements ClienteService {
         domicilio.setPais(request.getPais());
     }
 
-    private NacionalidadResponse mapearNacionalidad(Integer nacionalidadId) {
+    private List<NacionalidadResponse> mapearNacionalidad(Integer nacionalidadId) {
         Nacionalidad nacionalidad = nacionalidadRepository.findById(nacionalidadId)
                 .orElseThrow(() -> new ValidacionException(
                         "El cliente tiene un nacionalidad_id (" + nacionalidadId + ") que ya no existe en el catálogo"));
         NacionalidadResponse response = new NacionalidadResponse();
         response.setId(nacionalidad.getId());
         response.setNombre(nacionalidad.getNombre());
-        return response;
+        return List.of(response);
     }
 
-    private ClienteResponse mapearResponse(Cliente cliente, Domicilio domicilio, Cuenta cuenta) {
+    // incluirIds = true solo al dar de alta o actualizar; en las consultas no se regresa el id.
+    private ClienteResponse mapearResponse(Cliente cliente, Domicilio domicilio, Cuenta cuenta, boolean incluirIds) {
         ClienteResponse response = new ClienteResponse();
-        response.setId(cliente.getId());
+        if (incluirIds) {
+            response.setId(cliente.getId());
+        }
         response.setNombre(cliente.getNombre());
         response.setSegundoNombre(cliente.getSegundoNombre());
         response.setApellidoPaterno(cliente.getApellidoPaterno());
@@ -370,7 +413,7 @@ public class ClienteServiceImpl implements ClienteService {
         }
 
         if (cuenta != null) {
-            response.setCuenta(mapearCuenta(cuenta));
+            response.setCuenta(incluirIds ? mapearCuentaConIds(cuenta) : mapearCuenta(cuenta));
         }
 
         return response;
@@ -379,14 +422,21 @@ public class ClienteServiceImpl implements ClienteService {
     // Método estático (sin estado) para que CuentaServiceImpl también lo
     // use y así no se repita esta conversión Cuenta -> CuentaResponse
     // en dos archivos distintos.
+    // Para consultas: sin los ids internos.
     public static CuentaResponse mapearCuenta(Cuenta cuenta) {
         CuentaResponse cuentaResponse = new CuentaResponse();
-        cuentaResponse.setId(cuenta.getId());
-        cuentaResponse.setClienteId(cuenta.getClienteId());
         cuentaResponse.setNumeroCuenta(cuenta.getNumeroCuenta());
         cuentaResponse.setSaldo(cuenta.getSaldo());
         cuentaResponse.setEstatus(cuenta.getEstatus());
         cuentaResponse.setFechaApertura(cuenta.getFechaApertura());
+        return cuentaResponse;
+    }
+
+    // Para el alta/actualización: incluye los ids de la cuenta y del cliente.
+    public static CuentaResponse mapearCuentaConIds(Cuenta cuenta) {
+        CuentaResponse cuentaResponse = mapearCuenta(cuenta);
+        cuentaResponse.setId(cuenta.getId());
+        cuentaResponse.setClienteId(cuenta.getClienteId());
         return cuentaResponse;
     }
 }

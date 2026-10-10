@@ -8,10 +8,21 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 import java.math.BigDecimal;
+import java.util.List;
 import java.util.Locale;
 
 import static com.proyecto.servicios.validation.ReglasValidacion.*;
 
+/**
+ * Datos permitidos para actualizar un cliente.
+ *
+ * A propósito NO incluye curp, rfc, fecha de nacimiento ni numeroCuenta:
+ * la regla de negocio dice que esos datos no se pueden modificar una vez
+ * creados. Al no existir el campo en este DTO, y como el JSON se lee en
+ * modo estricto (campos desconocidos = error), es imposible mandarlos a
+ * actualizar por esta vía. Las reglas de formato son las mismas que en
+ * ClienteRequest (ver ReglasValidacion).
+ */
 @Getter
 @Setter
 @NoArgsConstructor
@@ -46,10 +57,12 @@ public class ClienteUpdateRequest {
     @Pattern(regexp = SEXO, message = "El sexo debe capturarse como \"H\" o \"M\"")
     private String sexo;
 
-    // Debe ser el id de una nacionalidad del catálogo (GET /nacionalidades)
+    // Arreglo con UN solo objeto { "id": ..., "nombre": ... } del catálogo (GET /nacionalidades)
     @NotNull(message = "La nacionalidad es obligatoria")
-    @Positive(message = "La nacionalidad debe ser un id positivo del catálogo")
-    private Integer nacionalidadId;
+    @Size(min = 1, max = 1,
+            message = "La nacionalidad debe capturarse como un arreglo con un solo objeto, por ejemplo [{\"id\": 1, \"nombre\": \"Mexicana\"}]")
+    @Valid
+    private List<@NotNull(message = "El objeto de la nacionalidad no puede ser nulo") NacionalidadRequest> nacionalidad;
 
     @NotBlank(message = "El estado civil es obligatorio")
     @Pattern(regexp = ESTADO_CIVIL,

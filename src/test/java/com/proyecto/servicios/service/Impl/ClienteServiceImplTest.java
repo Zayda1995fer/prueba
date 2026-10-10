@@ -15,6 +15,7 @@ import com.proyecto.servicios.model.onboarding.DomicilioRequest;
 import com.proyecto.servicios.repositorys.onboarding.ClienteRepository;
 import com.proyecto.servicios.repositorys.onboarding.CuentaRepository;
 import com.proyecto.servicios.repositorys.onboarding.DomicilioRepository;
+import com.proyecto.servicios.model.onboarding.NacionalidadRequest;
 import com.proyecto.servicios.repositorys.onboarding.NacionalidadRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -26,6 +27,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -67,7 +69,7 @@ class ClienteServiceImplTest {
         request.setCurp("GALJ900101HDFRPN01");
         request.setRfc("GALJ900101A01");
         request.setSexo("H");
-        request.setNacionalidadId(1);
+        request.setNacionalidad(List.of(nacionalidad(1, "Mexicana")));
         request.setEstadoCivil("Soltero");
         request.setCorreoElectronico("juan.garcia@correo.com");
         request.setTelefonoMovil(5512345678L);
@@ -96,7 +98,6 @@ class ClienteServiceImplTest {
         Nacionalidad mexicana = new Nacionalidad();
         mexicana.setId(1);
         mexicana.setNombre("Mexicana");
-        when(nacionalidadRepository.existsById(1)).thenReturn(true);
         when(nacionalidadRepository.findById(1)).thenReturn(Optional.of(mexicana));
         when(clienteRepository.save(any(Cliente.class))).thenAnswer(inv -> {
             Cliente c = inv.getArgument(0);
@@ -114,8 +115,9 @@ class ClienteServiceImplTest {
         ClienteResponse response = clienteService.registrarCliente(solicitudValida());
 
         assertThat(response.getId()).isEqualTo(1);
-        assertThat(response.getNacionalidad()).isNotNull();
-        assertThat(response.getNacionalidad().getNombre()).isEqualTo("Mexicana");
+        assertThat(response.getNacionalidad()).hasSize(1);
+        assertThat(response.getNacionalidad().get(0).getId()).isEqualTo(1);
+        assertThat(response.getNacionalidad().get(0).getNombre()).isEqualTo("Mexicana");
         assertThat(response.getCuenta()).isNotNull();
         assertThat(response.getCuenta().getEstatus()).isEqualTo(Cuenta.ESTATUS_ACTIVA);
         assertThat(response.getCuenta().getNumeroCuenta()).hasSize(10);
@@ -169,16 +171,88 @@ class ClienteServiceImplTest {
         when(clienteRepository.existsByCurp(anyString())).thenReturn(false);
         when(clienteRepository.existsByRfc(anyString())).thenReturn(false);
         when(clienteRepository.existsByCorreoElectronico(anyString())).thenReturn(false);
-        when(nacionalidadRepository.existsById(999)).thenReturn(false);
+        when(nacionalidadRepository.findById(999)).thenReturn(Optional.empty());
 
         ClienteRequest request = solicitudValida();
-        request.setNacionalidadId(999);
+        request.setNacionalidad(List.of(nacionalidad(999, "Mexicana")));
 
         assertThatThrownBy(() -> clienteService.registrarCliente(request))
                 .isInstanceOf(ValidacionException.class)
                 .hasMessageContaining("catálogo");
 
         verifyNoInteractions(cuentaRepository);
+    }
+
+    @Test
+    void registrarCliente_nombreDeNacionalidadNoCorrespondeAlId_lanzaValidacionException() {
+        when(clienteRepository.existsByCurp(anyString())).thenReturn(false);
+        when(clienteRepository.existsByRfc(anyString())).thenReturn(false);
+        when(clienteRepository.existsByCorreoElectronico(anyString())).thenReturn(false);
+        Nacionalidad mexicana = new Nacionalidad();
+        mexicana.setId(1);
+        mexicana.setNombre("Mexicana");
+        when(nacionalidadRepository.findById(1)).thenReturn(Optional.of(mexicana));
+
+        ClienteRequest request = solicitudValida();
+        request.setNacionalidad(List.of(nacionalidad(1, "Estadounidense")));
+
+        assertThatThrownBy(() -> clienteService.registrarCliente(request))
+                .isInstanceOf(ValidacionException.class)
+                .hasMessageContaining("no corresponde al id 1");
+        verifyNoInteractions(cuentaRepository);
+    }
+
+    @Test
+    void registrarCliente_nacionalidadEnMasculino_seAcepta() {
+        when(clienteRepository.existsByCurp(anyString())).thenReturn(false);
+        when(clienteRepository.existsByRfc(anyString())).thenReturn(false);
+        when(clienteRepository.existsByCorreoElectronico(anyString())).thenReturn(false);
+        Nacionalidad mexicana = new Nacionalidad();
+        mexicana.setId(1);
+        mexicana.setNombre("Mexicana");
+        when(nacionalidadRepository.findById(1)).thenReturn(Optional.of(mexicana));
+        when(clienteRepository.save(any(Cliente.class))).thenAnswer(inv -> {
+            Cliente c = inv.getArgument(0);
+            c.setId(1);
+            return c;
+        });
+        when(domicilioRepository.save(any(Domicilio.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(cuentaRepository.existsByNumeroCuenta(anyString())).thenReturn(false);
+        when(cuentaRepository.save(any(Cuenta.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        ClienteRequest request = solicitudValida();
+        request.setNacionalidad(List.of(nacionalidad(1, "MEXICANO")));
+
+        ClienteResponse response = clienteService.registrarCliente(request);
+
+        assertThat(response.getNacionalidad().get(0).getNombre()).isEqualTo("Mexicana");
+    }
+
+    @Test
+    void consultarPorId_noRegresaElId() {
+        Cliente cliente = new Cliente();
+        cliente.setId(7);
+        cliente.setNombre("Juan");
+        cliente.setNacionalidadId(1);
+        cliente.setIngresoMensual(new java.math.BigDecimal("15000.00"));
+        Nacionalidad mexicana = new Nacionalidad();
+        mexicana.setId(1);
+        mexicana.setNombre("Mexicana");
+        when(clienteRepository.findById(7)).thenReturn(Optional.of(cliente));
+        when(nacionalidadRepository.findById(1)).thenReturn(Optional.of(mexicana));
+        when(domicilioRepository.findByClienteId(7)).thenReturn(Optional.empty());
+        when(cuentaRepository.findByClienteId(7)).thenReturn(Optional.empty());
+
+        ClienteResponse response = clienteService.consultarPorId(7);
+
+        assertThat(response.getId()).isNull();
+    }
+
+    private static NacionalidadRequest nacionalidad(int id, String nombre) {
+        NacionalidadRequest n = new NacionalidadRequest();
+        n.setId(id);
+        n.setNombre(nombre);
+        return n;
     }
 
     @Test
@@ -209,5 +283,60 @@ class ClienteServiceImplTest {
 
         assertThat(cliente.getActivo()).isFalse();
         assertThat(cuenta.getEstatus()).isEqualTo(Cuenta.ESTATUS_INACTIVA);
+    }
+
+    @Test
+    void registrarCliente_edadMayorALaMaxima_lanzaValidacionConCampo() {
+        ClienteRequest request = solicitudValida();
+        request.setFechaNacimiento(LocalDate.now().minusYears(130));
+
+        assertThatThrownBy(() -> clienteService.registrarCliente(request))
+                .isInstanceOfSatisfying(ValidacionException.class, ex -> {
+                    assertThat(ex.getMessage()).contains("no puede ser mayor");
+                    assertThat(ex.getCampo()).isEqualTo("fechaNacimiento");
+                });
+        verifyNoInteractions(cuentaRepository);
+    }
+
+    @Test
+    void registrarCliente_telefonoAlternativoIgualAlMovil_lanzaValidacionConCampo() {
+        ClienteRequest request = solicitudValida();
+        request.setTelefonoAlternativo(request.getTelefonoMovil());
+
+        assertThatThrownBy(() -> clienteService.registrarCliente(request))
+                .isInstanceOfSatisfying(ValidacionException.class, ex -> {
+                    assertThat(ex.getMessage()).contains("no puede ser igual");
+                    assertThat(ex.getCampo()).isEqualTo("telefonoAlternativo");
+                });
+        verifyNoInteractions(cuentaRepository);
+    }
+
+    @Test
+    void registrarCliente_curpDeOtraPersona_lanzaValidacionConCampoCurp() {
+        ClienteRequest request = solicitudValida();
+        request.setCurp("PEPJ900101HDFRRN01"); // CURP de otra persona (no coincide con Garcia Lopez Juan)
+
+        assertThatThrownBy(() -> clienteService.registrarCliente(request))
+                .isInstanceOfSatisfying(ValidacionException.class,
+                        ex -> assertThat(ex.getCampo()).isEqualTo("curp"));
+    }
+
+    @Test
+    void registrarCliente_curpDuplicada_indicaElCampoCurp() {
+        when(clienteRepository.existsByCurp(anyString())).thenReturn(true);
+
+        assertThatThrownBy(() -> clienteService.registrarCliente(solicitudValida()))
+                .isInstanceOfSatisfying(CurpDuplicadaException.class,
+                        ex -> assertThat(ex.getCampo()).isEqualTo("curp"));
+    }
+
+    @Test
+    void consultarPorCurp_enMinusculas_buscaEnMayusculas() {
+        when(clienteRepository.findByCurp("GALJ900101HDFRPN01")).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> clienteService.consultarPorCurp("galj900101hdfrpn01"))
+                .isInstanceOf(ClienteNoEncontradoException.class);
+
+        verify(clienteRepository).findByCurp("GALJ900101HDFRPN01");
     }
 }

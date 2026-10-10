@@ -133,7 +133,11 @@ public class GlobalExceptionHandler {
 
         if (causa instanceof UnrecognizedPropertyException desconocida) {
             campo = rutaCompleta(desconocida) ;
-            mensaje = "El campo '" + desconocida.getPropertyName() + "' no está permitido en esta petición";
+            // Si el campo desconocido viene dentro de un objeto (p. ej. domicilio), se indica de cuál.
+            String objeto = rutaObjetoPadre(campo);
+            mensaje = objeto == null
+                    ? "El campo '" + desconocida.getPropertyName() + "' no está permitido en el objeto de la petición"
+                    : "El campo '" + desconocida.getPropertyName() + "' no está permitido en el objeto '" + objeto + "'";
         } else if (causa instanceof JsonMappingException mapeo) {
             campo = rutaCompleta(mapeo);
             mensaje = mensajePorTipo(campo, mapeo);
@@ -276,6 +280,15 @@ public class GlobalExceptionHandler {
         return ruta.isEmpty() ? null : ruta;
     }
 
+    // "domicilio.xyz" -> "domicilio"; "nacionalidad[0].xyz" -> "nacionalidad[0]"; "xyz" -> null
+    private String rutaObjetoPadre(String ruta) {
+        if (ruta == null) {
+            return null;
+        }
+        int punto = ruta.lastIndexOf('.');
+        return punto < 0 ? null : ruta.substring(0, punto);
+    }
+
     private String mensajePorTipo(String campo, JsonMappingException ex) {
         String nombre = campo == null ? "el campo" : "'" + campo + "'";
         String minusculas = campo == null ? "" : campo.toLowerCase();
@@ -287,6 +300,13 @@ public class GlobalExceptionHandler {
         Class<?> destino = ex instanceof MismatchedInputException mismatched ? mismatched.getTargetType() : null;
         if (destino == null) {
             return "El valor de " + nombre + " no tiene un formato válido";
+        }
+        // Propiedades que son objetos o arreglos (domicilio, nacionalidad)
+        if (java.util.Collection.class.isAssignableFrom(destino) || destino.isArray()) {
+            return "El objeto " + nombre + " debe enviarse como un arreglo de objetos, por ejemplo [{\"id\": 1, \"nombre\": \"Mexicana\"}]";
+        }
+        if (!destino.isPrimitive() && !destino.getName().startsWith("java.") && !destino.isEnum()) {
+            return "El objeto " + nombre + " debe enviarse como un objeto JSON con sus propiedades entre llaves { }";
         }
         if (destino == LocalDate.class) {
             return "El valor de " + nombre + " debe ser una fecha real con formato AAAA-MM-DD";
@@ -321,6 +341,12 @@ public class GlobalExceptionHandler {
                     if (campos[i].getName().equals(nombre)) {
                         indice = i;
                         siguiente = campos[i].getType();
+                        if (List.class.isAssignableFrom(siguiente)
+                                && campos[i].getGenericType() instanceof java.lang.reflect.ParameterizedType pt
+                                && pt.getActualTypeArguments().length == 1
+                                && pt.getActualTypeArguments()[0] instanceof Class<?> elemento) {
+                            siguiente = elemento;   // List<NacionalidadRequest> -> NacionalidadRequest
+                        }
                         break;
                     }
                 }
