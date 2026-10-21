@@ -1,33 +1,18 @@
 package com.proyecto.servicios.service;
 
+import com.proyecto.servicios.model.onboarding.ClienteConsultaRequest;
 import com.proyecto.servicios.model.onboarding.ClienteRequest;
 import com.proyecto.servicios.model.onboarding.ClienteResponse;
 import com.proyecto.servicios.model.onboarding.ClienteUpdateRequest;
 
-import java.time.LocalDateTime;
 import java.util.List;
 
 public interface ClienteService {
 
     ClienteResponse registrarCliente(ClienteRequest request);
 
-    List<ClienteResponse> consultarTodos();
+    // Único método de consulta: filtros opcionales y combinables (ver ClienteConsultaRequest)
+    List<ClienteResponse> consultarClientes(ClienteConsultaRequest criterios);
 
-    ClienteResponse consultarPorId(Integer id);
-
-    ClienteResponse consultarPorCurp(String curp);
-
-    ClienteResponse consultarPorRfc(String rfc);
-
-    ClienteResponse consultarPorCorreo(String correo);
-
-    ClienteResponse consultarPorNumeroCuenta(String numeroCuenta);
-
-    List<ClienteResponse> consultarActivos();
-
-    List<ClienteResponse> consultarPorRangoDeFechas(LocalDateTime desde, LocalDateTime hasta);
-
-    ClienteResponse actualizarCliente(Integer id, ClienteUpdateRequest request);
-
-    void darDeBajaCliente(Integer id);
+    ClienteResponse actualizarCliente(ClienteUpdateRequest request);
 }
