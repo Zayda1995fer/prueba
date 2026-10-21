@@ -1,7 +1,8 @@
 package com.proyecto.servicios.util;
 
-import com.proyecto.servicios.exception.ValidacionException;
 
+import com.proyecto.servicios.exception.NegocioException;
+import com.proyecto.servicios.exception.CatalogoError;
 import java.text.Normalizer;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
@@ -9,7 +10,19 @@ import java.time.format.DateTimeFormatter;
 /**
  * Verifica que la CURP y el RFC capturados realmente se correspondan con
  * el resto de los datos del cliente (nombre, apellidos, fecha de
- * nacimiento y sexo)
+ * nacimiento y sexo), y no solo que tengan el formato correcto.
+ *
+ * El formato (longitud, letras/dígitos en el lugar correcto) ya se
+ * valida con @Pattern en ClienteRequest/ClienteUpdateRequest. Esta clase
+ * valida el CONTENIDO: que las letras y la fecha dentro de la CURP/RFC
+ * coincidan con lo que el cliente escribió en los demás campos, usando
+ * el mismo algoritmo oficial con el que se construyen esos documentos.
+ *
+ * Simplificación consciente: la regla oficial de RENAPO para el "nombre"
+ * ignora palabras como "MARIA" o "JOSE" cuando van seguidas de un
+ * segundo nombre (p. ej. "MARIA GUADALUPE" usa "GUADALUPE"). Ese caso
+ * especial no se implementa aquí; se usa siempre la primera letra del
+ * campo "nombre" tal cual se capturó, que cubre el caso normal.
  */
 public final class CurpRfcValidator {
 
@@ -24,11 +37,11 @@ public final class CurpRfcValidator {
      * @param sexo             "H" o "M"
      * @param curp             CURP capturada (ya validada en formato)
      * @param rfc              RFC capturado (ya validado en formato)
-     * @throws ValidacionException si la CURP o el RFC no coinciden con los demás datos
+     * @throws NegocioException si la CURP o el RFC no coinciden con los demás datos
      */
     public static void validar(String nombre, String apellidoPaterno, String apellidoMaterno,
-                               LocalDate fechaNacimiento, String sexo,
-                               String curp, String rfc) {
+                                 LocalDate fechaNacimiento, String sexo,
+                                 String curp, String rfc) {
 
         String letrasEsperadas =
                 primeraLetra(apellidoPaterno)
@@ -42,60 +55,49 @@ public final class CurpRfcValidator {
         String rfcUpper = rfc == null ? "" : rfc.toUpperCase();
 
         if (curpUpper.length() < 11) {
-            throw new ValidacionException("La CURP no tiene la longitud suficiente para validarse");
+            throw new NegocioException(CatalogoError.CURP_LONGITUD);
         }
 
         // --- CURP: letras iniciales ---
         String letrasCurp = curpUpper.substring(0, 4);
         if (!letrasCurp.equals(letrasEsperadas)) {
-            throw new ValidacionException(
-                    "La CURP no coincide con el nombre y apellidos capturados "
-                            + "(se esperaba que empezara con \"" + letrasEsperadas
-                            + "\", de acuerdo al apellido paterno, apellido materno y nombre)");
+            throw new NegocioException(CatalogoError.CURP_NOMBRE, letrasEsperadas);
         }
 
         // --- CURP: fecha de nacimiento ---
         String fechaCurp = curpUpper.substring(4, 10);
         if (!fechaCurp.equals(fechaEsperada)) {
-            throw new ValidacionException(
-                    "La CURP no coincide con la fecha de nacimiento capturada "
-                            + "(se esperaba la fecha " + fechaEsperada + " en formato AAMMDD)");
+            throw new NegocioException(CatalogoError.CURP_FECHA, fechaEsperada);
         }
 
         // --- CURP: sexo ---
         char sexoEsperado = sexo == null || sexo.isBlank() ? '?' : Character.toUpperCase(sexo.trim().charAt(0));
         if (sexoEsperado != 'H' && sexoEsperado != 'M') {
-            throw new ValidacionException("El sexo debe capturarse como \"H\" o \"M\" para poder validar la CURP");
+            throw new NegocioException(CatalogoError.SEXO_INVALIDO);
         }
         char sexoCurp = curpUpper.charAt(10);
         if (sexoCurp != sexoEsperado) {
-            throw new ValidacionException(
-                    "La CURP no coincide con el sexo capturado (la CURP indica \"" + sexoCurp
-                            + "\" y se capturó \"" + sexoEsperado + "\")");
+            throw new NegocioException(CatalogoError.CURP_SEXO, sexoCurp, sexoEsperado);
         }
 
         // --- RFC: letras iniciales (mismo algoritmo que la CURP) ---
         if (rfcUpper.length() < 10) {
-            throw new ValidacionException("El RFC no tiene la longitud suficiente para validarse");
+            throw new NegocioException(CatalogoError.RFC_LONGITUD);
         }
         String letrasRfc = rfcUpper.substring(0, 4);
         if (!letrasRfc.equals(letrasEsperadas)) {
-            throw new ValidacionException(
-                    "El RFC no coincide con el nombre y apellidos capturados "
-                            + "(se esperaba que empezara con \"" + letrasEsperadas + "\")");
+            throw new NegocioException(CatalogoError.RFC_NOMBRE, letrasEsperadas);
         }
 
         // --- RFC: fecha de nacimiento ---
         String fechaRfc = rfcUpper.substring(4, 10);
         if (!fechaRfc.equals(fechaEsperada)) {
-            throw new ValidacionException(
-                    "El RFC no coincide con la fecha de nacimiento capturada "
-                            + "(se esperaba la fecha " + fechaEsperada + " en formato AAMMDD)");
+            throw new NegocioException(CatalogoError.RFC_FECHA, fechaEsperada);
         }
 
         // --- Consistencia cruzada CURP/RFC entre sí ---
         if (!letrasCurp.equals(letrasRfc) || !fechaCurp.equals(fechaRfc)) {
-            throw new ValidacionException("La CURP y el RFC capturados no son consistentes entre sí");
+            throw new NegocioException(CatalogoError.CURP_RFC_INCONSISTENTES);
         }
     }
 

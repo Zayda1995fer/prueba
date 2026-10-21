@@ -1,20 +1,19 @@
 package com.proyecto.servicios.service.Impl;
 
+import com.proyecto.servicios.exception.CatalogoError;
+import com.proyecto.servicios.exception.NegocioException;
 import com.proyecto.servicios.entity.onboarding.Cliente;
 import com.proyecto.servicios.entity.onboarding.Cuenta;
 import com.proyecto.servicios.entity.onboarding.Domicilio;
 import com.proyecto.servicios.entity.onboarding.Nacionalidad;
-import com.proyecto.servicios.exception.ClienteNoEncontradoException;
-import com.proyecto.servicios.exception.ClienteYaRegistradoException;
-import com.proyecto.servicios.exception.CurpDuplicadaException;
-import com.proyecto.servicios.exception.RfcDuplicadoException;
-import com.proyecto.servicios.exception.ValidacionException;
 import com.proyecto.servicios.model.onboarding.ClienteRequest;
 import com.proyecto.servicios.model.onboarding.ClienteResponse;
+import com.proyecto.servicios.model.onboarding.ClienteUpdateRequest;
 import com.proyecto.servicios.model.onboarding.DomicilioRequest;
 import com.proyecto.servicios.repositorys.onboarding.ClienteRepository;
 import com.proyecto.servicios.repositorys.onboarding.CuentaRepository;
 import com.proyecto.servicios.repositorys.onboarding.DomicilioRepository;
+import com.proyecto.servicios.model.onboarding.ClienteConsultaRequest;
 import com.proyecto.servicios.model.onboarding.NacionalidadRequest;
 import com.proyecto.servicios.repositorys.onboarding.NacionalidadRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -27,6 +26,9 @@ import org.springframework.test.util.ReflectionTestUtils;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import org.mockito.ArgumentMatchers;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.jpa.domain.Specification;
 import java.util.List;
 import java.util.Optional;
 
@@ -133,7 +135,7 @@ class ClienteServiceImplTest {
         request.setFechaNacimiento(LocalDate.now().minusYears(10));
 
         assertThatThrownBy(() -> clienteService.registrarCliente(request))
-                .isInstanceOf(ValidacionException.class)
+                .isInstanceOfSatisfying(NegocioException.class, ex -> assertThat(ex.getError()).isEqualTo(CatalogoError.CLIENTE_MENOR_DE_EDAD))
                 .hasMessageContaining("mayor de edad");
 
         verifyNoInteractions(cuentaRepository);
@@ -144,7 +146,7 @@ class ClienteServiceImplTest {
         when(clienteRepository.existsByCurp(anyString())).thenReturn(true);
 
         assertThatThrownBy(() -> clienteService.registrarCliente(solicitudValida()))
-                .isInstanceOf(CurpDuplicadaException.class);
+                .isInstanceOfSatisfying(NegocioException.class, ex -> assertThat(ex.getError()).isEqualTo(CatalogoError.CURP_DUPLICADA));
     }
 
     @Test
@@ -153,7 +155,7 @@ class ClienteServiceImplTest {
         when(clienteRepository.existsByRfc(anyString())).thenReturn(true);
 
         assertThatThrownBy(() -> clienteService.registrarCliente(solicitudValida()))
-                .isInstanceOf(RfcDuplicadoException.class);
+                .isInstanceOfSatisfying(NegocioException.class, ex -> assertThat(ex.getError()).isEqualTo(CatalogoError.RFC_DUPLICADO));
     }
 
     @Test
@@ -163,7 +165,7 @@ class ClienteServiceImplTest {
         when(clienteRepository.existsByCorreoElectronico(anyString())).thenReturn(true);
 
         assertThatThrownBy(() -> clienteService.registrarCliente(solicitudValida()))
-                .isInstanceOf(ClienteYaRegistradoException.class);
+                .isInstanceOfSatisfying(NegocioException.class, ex -> assertThat(ex.getError()).isEqualTo(CatalogoError.CORREO_DUPLICADO));
     }
 
     @Test
@@ -177,7 +179,7 @@ class ClienteServiceImplTest {
         request.setNacionalidad(List.of(nacionalidad(999, "Mexicana")));
 
         assertThatThrownBy(() -> clienteService.registrarCliente(request))
-                .isInstanceOf(ValidacionException.class)
+                .isInstanceOfSatisfying(NegocioException.class, ex -> assertThat(ex.getError()).isEqualTo(CatalogoError.NACIONALIDAD_NO_EXISTE))
                 .hasMessageContaining("catálogo");
 
         verifyNoInteractions(cuentaRepository);
@@ -197,7 +199,7 @@ class ClienteServiceImplTest {
         request.setNacionalidad(List.of(nacionalidad(1, "Estadounidense")));
 
         assertThatThrownBy(() -> clienteService.registrarCliente(request))
-                .isInstanceOf(ValidacionException.class)
+                .isInstanceOfSatisfying(NegocioException.class, ex -> assertThat(ex.getError()).isEqualTo(CatalogoError.NACIONALIDAD_NOMBRE_NO_COINCIDE))
                 .hasMessageContaining("no corresponde al id 1");
         verifyNoInteractions(cuentaRepository);
     }
@@ -228,26 +230,6 @@ class ClienteServiceImplTest {
         assertThat(response.getNacionalidad().get(0).getNombre()).isEqualTo("Mexicana");
     }
 
-    @Test
-    void consultarPorId_noRegresaElId() {
-        Cliente cliente = new Cliente();
-        cliente.setId(7);
-        cliente.setNombre("Juan");
-        cliente.setNacionalidadId(1);
-        cliente.setIngresoMensual(new java.math.BigDecimal("15000.00"));
-        Nacionalidad mexicana = new Nacionalidad();
-        mexicana.setId(1);
-        mexicana.setNombre("Mexicana");
-        when(clienteRepository.findById(7)).thenReturn(Optional.of(cliente));
-        when(nacionalidadRepository.findById(1)).thenReturn(Optional.of(mexicana));
-        when(domicilioRepository.findByClienteId(7)).thenReturn(Optional.empty());
-        when(cuentaRepository.findByClienteId(7)).thenReturn(Optional.empty());
-
-        ClienteResponse response = clienteService.consultarPorId(7);
-
-        assertThat(response.getId()).isNull();
-    }
-
     private static NacionalidadRequest nacionalidad(int id, String nombre) {
         NacionalidadRequest n = new NacionalidadRequest();
         n.setId(id);
@@ -256,33 +238,163 @@ class ClienteServiceImplTest {
     }
 
     @Test
-    void consultarPorId_noExiste_lanzaClienteNoEncontradoException() {
-        when(clienteRepository.findById(99)).thenReturn(Optional.empty());
+    void consultarClientes_noRegresaElId() {
+        Cliente cliente = new Cliente();
+        cliente.setId(7);
+        cliente.setNombre("Juan");
+        cliente.setNacionalidadId(1);
+        cliente.setIngresoMensual(new java.math.BigDecimal("15000.00"));
+        Nacionalidad mexicana = new Nacionalidad();
+        mexicana.setId(1);
+        mexicana.setNombre("Mexicana");
+        when(clienteRepository.findAll(ArgumentMatchers.<Specification<Cliente>>any(), any(Sort.class)))
+                .thenReturn(List.of(cliente));
+        when(nacionalidadRepository.findById(1)).thenReturn(Optional.of(mexicana));
+        when(domicilioRepository.findByClienteId(7)).thenReturn(Optional.empty());
+        when(cuentaRepository.findByClienteId(7)).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> clienteService.consultarPorId(99))
-                .isInstanceOf(ClienteNoEncontradoException.class);
+        ClienteConsultaRequest criterios = new ClienteConsultaRequest();
+        criterios.setId(7);
+        List<ClienteResponse> respuesta = clienteService.consultarClientes(criterios);
+
+        assertThat(respuesta).hasSize(1);
+        assertThat(respuesta.get(0).getId()).isNull();
     }
 
     @Test
-    void darDeBajaCliente_marcaClienteInactivoYCuentaInactiva() {
-        Cliente cliente = new Cliente();
-        cliente.setId(5);
-        cliente.setActivo(true);
+    void consultarClientes_porDatoUnicoQueNoExiste_lanzaClienteNoEncontradoException() {
+        when(clienteRepository.findAll(ArgumentMatchers.<Specification<Cliente>>any(), any(Sort.class)))
+                .thenReturn(List.of());
 
+        ClienteConsultaRequest criterios = new ClienteConsultaRequest();
+        criterios.setId(99);
+
+        assertThatThrownBy(() -> clienteService.consultarClientes(criterios))
+                .isInstanceOfSatisfying(NegocioException.class, ex -> assertThat(ex.getError()).isEqualTo(CatalogoError.CLIENTE_NO_ENCONTRADO));
+    }
+
+    @Test
+    void consultarClientes_filtroGeneralSinResultados_regresaListaVacia() {
+        when(clienteRepository.findAll(ArgumentMatchers.<Specification<Cliente>>any(), any(Sort.class)))
+                .thenReturn(List.of());
+
+        ClienteConsultaRequest criterios = new ClienteConsultaRequest();
+        criterios.setNombre("Zacarias");
+        criterios.setActivo(true);
+
+        assertThat(clienteService.consultarClientes(criterios)).isEmpty();
+    }
+
+    @Test
+    void consultarClientes_fechaDesdePosteriorAHasta_lanzaValidacionConCampo() {
+        ClienteConsultaRequest criterios = new ClienteConsultaRequest();
+        criterios.setFechaCreacionDesde(java.time.LocalDate.of(2026, 10, 10));
+        criterios.setFechaCreacionHasta(java.time.LocalDate.of(2026, 10, 1));
+
+        assertThatThrownBy(() -> clienteService.consultarClientes(criterios))
+                .isInstanceOfSatisfying(NegocioException.class, ex -> assertThat(ex.getError()).isEqualTo(CatalogoError.RANGO_FECHAS_INVALIDO))
+                .satisfies(ex -> assertThat(((NegocioException) ex).getCampo()).isEqualTo("fechaCreacionDesde"));
+        verifyNoInteractions(clienteRepository);
+    }
+
+    @Test
+    void consultarClientes_numeroDeCuentaInexistente_lanzaCuentaNoEncontradaException() {
+        when(cuentaRepository.findByNumeroCuenta("0000000000")).thenReturn(Optional.empty());
+
+        ClienteConsultaRequest criterios = new ClienteConsultaRequest();
+        criterios.setNumeroCuenta("0000000000");
+
+        assertThatThrownBy(() -> clienteService.consultarClientes(criterios))
+                .isInstanceOfSatisfying(NegocioException.class, ex -> {
+                    assertThat(ex.getError()).isEqualTo(CatalogoError.CUENTA_NO_ENCONTRADA);
+                    assertThat(ex.getMessage()).isEqualTo("No se encontró la cuenta con número: 0000000000");
+                });
+    }
+
+    private ClienteUpdateRequest actualizacionValida(Integer id) {
+        ClienteUpdateRequest u = new ClienteUpdateRequest();
+        u.setId(id);
+        u.setNombre("Juan");
+        u.setApellidoPaterno("Garcia");
+        u.setApellidoMaterno("Lopez");
+        u.setSexo("H");
+        u.setNacionalidad(List.of(nacionalidad(1, "Mexicana")));
+        u.setEstadoCivil("Soltero");
+        u.setCorreoElectronico("juan.garcia@correo.com");
+        u.setTelefonoMovil(5512345678L);
+        u.setOcupacion("Ingeniero");
+        u.setEmpresa("ACME");
+        u.setIngresoMensual(new BigDecimal("15000.00"));
+        u.setDomicilio(solicitudValida().getDomicilio());
+        return u;
+    }
+
+    private Cliente clienteExistente(Integer id) {
+        Cliente cliente = new Cliente();
+        cliente.setId(id);
+        cliente.setNombre("Juan");
+        cliente.setApellidoPaterno("Garcia");
+        cliente.setApellidoMaterno("Lopez");
+        cliente.setFechaNacimiento(LocalDate.of(1990, 1, 1));
+        cliente.setCurp("GALJ900101HDFRPN01");
+        cliente.setRfc("GALJ900101A01");
+        cliente.setSexo("H");
+        cliente.setNacionalidadId(1);
+        cliente.setCorreoElectronico("juan.garcia@correo.com");
+        cliente.setActivo(true);
+        return cliente;
+    }
+
+    private void simularRepositoriosDeActualizacion(Cliente cliente, Cuenta cuenta) {
+        Nacionalidad mexicana = new Nacionalidad();
+        mexicana.setId(1);
+        mexicana.setNombre("Mexicana");
+        when(nacionalidadRepository.findById(1)).thenReturn(Optional.of(mexicana));
+        when(clienteRepository.findById(cliente.getId())).thenReturn(Optional.of(cliente));
+        when(clienteRepository.save(any(Cliente.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(domicilioRepository.findByClienteId(cliente.getId())).thenReturn(Optional.empty());
+        when(domicilioRepository.save(any(Domicilio.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(cuentaRepository.findByClienteId(cliente.getId())).thenReturn(Optional.of(cuenta));
+    }
+
+    private Cuenta cuentaExistente(Integer clienteId) {
         Cuenta cuenta = new Cuenta();
         cuenta.setId(9);
-        cuenta.setClienteId(5);
+        cuenta.setClienteId(clienteId);
+        cuenta.setNumeroCuenta("1234567890");
+        cuenta.setSaldo(new BigDecimal("0.00"));
         cuenta.setEstatus(Cuenta.ESTATUS_ACTIVA);
+        cuenta.setFechaApertura(java.time.LocalDateTime.now());
+        return cuenta;
+    }
 
-        when(clienteRepository.findById(5)).thenReturn(Optional.of(cliente));
-        when(clienteRepository.save(any(Cliente.class))).thenAnswer(inv -> inv.getArgument(0));
-        when(cuentaRepository.findByClienteId(5)).thenReturn(Optional.of(cuenta));
+    @Test
+    void actualizarCliente_conActivoFalse_daDeBajaAlClienteYDejaInactivaSuCuenta() {
+        Cliente cliente = clienteExistente(5);
+        Cuenta cuenta = cuentaExistente(5);
+        simularRepositoriosDeActualizacion(cliente, cuenta);
         when(cuentaRepository.save(any(Cuenta.class))).thenAnswer(inv -> inv.getArgument(0));
 
-        clienteService.darDeBajaCliente(5);
+        ClienteUpdateRequest request = actualizacionValida(5);
+        request.setActivo(false);
+        ClienteResponse response = clienteService.actualizarCliente(request);
 
         assertThat(cliente.getActivo()).isFalse();
         assertThat(cuenta.getEstatus()).isEqualTo(Cuenta.ESTATUS_INACTIVA);
+        assertThat(response.getActivo()).isFalse();
+    }
+
+    @Test
+    void actualizarCliente_sinCampoActivo_noCambiaElEstatus() {
+        Cliente cliente = clienteExistente(5);
+        Cuenta cuenta = cuentaExistente(5);
+        simularRepositoriosDeActualizacion(cliente, cuenta);
+
+        clienteService.actualizarCliente(actualizacionValida(5));
+
+        assertThat(cliente.getActivo()).isTrue();
+        assertThat(cuenta.getEstatus()).isEqualTo(Cuenta.ESTATUS_ACTIVA);
+        verify(cuentaRepository, never()).save(any(Cuenta.class));
     }
 
     @Test
@@ -291,7 +403,7 @@ class ClienteServiceImplTest {
         request.setFechaNacimiento(LocalDate.now().minusYears(130));
 
         assertThatThrownBy(() -> clienteService.registrarCliente(request))
-                .isInstanceOfSatisfying(ValidacionException.class, ex -> {
+                .isInstanceOfSatisfying(NegocioException.class, ex -> {
                     assertThat(ex.getMessage()).contains("no puede ser mayor");
                     assertThat(ex.getCampo()).isEqualTo("fechaNacimiento");
                 });
@@ -304,7 +416,7 @@ class ClienteServiceImplTest {
         request.setTelefonoAlternativo(request.getTelefonoMovil());
 
         assertThatThrownBy(() -> clienteService.registrarCliente(request))
-                .isInstanceOfSatisfying(ValidacionException.class, ex -> {
+                .isInstanceOfSatisfying(NegocioException.class, ex -> {
                     assertThat(ex.getMessage()).contains("no puede ser igual");
                     assertThat(ex.getCampo()).isEqualTo("telefonoAlternativo");
                 });
@@ -317,7 +429,7 @@ class ClienteServiceImplTest {
         request.setCurp("PEPJ900101HDFRRN01"); // CURP de otra persona (no coincide con Garcia Lopez Juan)
 
         assertThatThrownBy(() -> clienteService.registrarCliente(request))
-                .isInstanceOfSatisfying(ValidacionException.class,
+                .isInstanceOfSatisfying(NegocioException.class,
                         ex -> assertThat(ex.getCampo()).isEqualTo("curp"));
     }
 
@@ -326,17 +438,7 @@ class ClienteServiceImplTest {
         when(clienteRepository.existsByCurp(anyString())).thenReturn(true);
 
         assertThatThrownBy(() -> clienteService.registrarCliente(solicitudValida()))
-                .isInstanceOfSatisfying(CurpDuplicadaException.class,
+                .isInstanceOfSatisfying(NegocioException.class,
                         ex -> assertThat(ex.getCampo()).isEqualTo("curp"));
-    }
-
-    @Test
-    void consultarPorCurp_enMinusculas_buscaEnMayusculas() {
-        when(clienteRepository.findByCurp("GALJ900101HDFRPN01")).thenReturn(Optional.empty());
-
-        assertThatThrownBy(() -> clienteService.consultarPorCurp("galj900101hdfrpn01"))
-                .isInstanceOf(ClienteNoEncontradoException.class);
-
-        verify(clienteRepository).findByCurp("GALJ900101HDFRPN01");
     }
 }

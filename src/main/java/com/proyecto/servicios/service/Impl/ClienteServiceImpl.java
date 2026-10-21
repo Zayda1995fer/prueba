@@ -1,14 +1,11 @@
 package com.proyecto.servicios.service.Impl;
 
+import com.proyecto.servicios.exception.CatalogoError;
+import com.proyecto.servicios.exception.NegocioException;
 import com.proyecto.servicios.entity.onboarding.Cliente;
 import com.proyecto.servicios.entity.onboarding.Cuenta;
 import com.proyecto.servicios.entity.onboarding.Domicilio;
 import com.proyecto.servicios.entity.onboarding.Nacionalidad;
-import com.proyecto.servicios.exception.ClienteNoEncontradoException;
-import com.proyecto.servicios.exception.CurpDuplicadaException;
-import com.proyecto.servicios.exception.RfcDuplicadoException;
-import com.proyecto.servicios.exception.ClienteYaRegistradoException;
-import com.proyecto.servicios.exception.ValidacionException;
 import com.proyecto.servicios.model.onboarding.*;
 import com.proyecto.servicios.repositorys.onboarding.ClienteRepository;
 import com.proyecto.servicios.repositorys.onboarding.CuentaRepository;
@@ -17,6 +14,11 @@ import com.proyecto.servicios.repositorys.onboarding.NacionalidadRepository;
 import com.proyecto.servicios.service.ClienteService;
 import com.proyecto.servicios.model.onboarding.NacionalidadRequest;
 import com.proyecto.servicios.util.CurpRfcValidator;
+import jakarta.persistence.criteria.CriteriaBuilder;
+import jakarta.persistence.criteria.Expression;
+import jakarta.persistence.criteria.Predicate;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.jpa.domain.Specification;
 import com.proyecto.servicios.util.NacionalidadNombre;
 import com.proyecto.servicios.validation.ReglasValidacion;
 import lombok.extern.slf4j.Slf4j;
@@ -29,6 +31,7 @@ import java.security.SecureRandom;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.Period;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 
@@ -53,9 +56,9 @@ public class ClienteServiceImpl implements ClienteService {
     private BigDecimal saldoInicial;
 
     public ClienteServiceImpl(ClienteRepository clienteRepository,
-                              DomicilioRepository domicilioRepository,
-                              CuentaRepository cuentaRepository,
-                              NacionalidadRepository nacionalidadRepository) {
+                               DomicilioRepository domicilioRepository,
+                               CuentaRepository cuentaRepository,
+                               NacionalidadRepository nacionalidadRepository) {
         this.clienteRepository = clienteRepository;
         this.domicilioRepository = domicilioRepository;
         this.cuentaRepository = cuentaRepository;
@@ -105,67 +108,89 @@ public class ClienteServiceImpl implements ClienteService {
     }
 
     @Override
-    public List<ClienteResponse> consultarTodos() {
-        return clienteRepository.findAll().stream()
-                .map(this::armarResponseCompleto)
-                .toList();
-    }
-
-    @Override
-    public ClienteResponse consultarPorId(Integer id) {
-        Cliente cliente = obtenerClienteOLanzar(id);
-        return armarResponseCompleto(cliente);
-    }
-
-    @Override
-    public ClienteResponse consultarPorCurp(String curp) {
-        Cliente cliente = clienteRepository.findByCurp(curp.toUpperCase(Locale.ROOT))
-                .orElseThrow(() -> new ClienteNoEncontradoException("CURP " + curp));
-        return armarResponseCompleto(cliente);
-    }
-
-    @Override
-    public ClienteResponse consultarPorRfc(String rfc) {
-        Cliente cliente = clienteRepository.findByRfc(rfc.toUpperCase(Locale.ROOT))
-                .orElseThrow(() -> new ClienteNoEncontradoException("RFC " + rfc));
-        return armarResponseCompleto(cliente);
-    }
-
-    @Override
-    public ClienteResponse consultarPorCorreo(String correo) {
-        Cliente cliente = clienteRepository.findByCorreoElectronico(correo.toLowerCase(Locale.ROOT))
-                .orElseThrow(() -> new ClienteNoEncontradoException("correo " + correo));
-        return armarResponseCompleto(cliente);
-    }
-
-    @Override
-    public ClienteResponse consultarPorNumeroCuenta(String numeroCuenta) {
-        Cuenta cuenta = cuentaRepository.findByNumeroCuenta(numeroCuenta)
-                .orElseThrow(() -> new ClienteNoEncontradoException("cuenta " + numeroCuenta));
-        Cliente cliente = obtenerClienteOLanzar(cuenta.getClienteId());
-        Domicilio domicilio = domicilioRepository.findByClienteId(cliente.getId()).orElse(null);
-        return mapearResponse(cliente, domicilio, cuenta, false);
-    }
-
-    @Override
-    public List<ClienteResponse> consultarActivos() {
-        return clienteRepository.findByActivoTrue().stream()
-                .map(this::armarResponseCompleto)
-                .toList();
-    }
-
-    @Override
-    public List<ClienteResponse> consultarPorRangoDeFechas(LocalDateTime desde, LocalDateTime hasta) {
-        if (desde.isAfter(hasta)) {
-            throw new ValidacionException("La fecha 'desde' no puede ser posterior a la fecha 'hasta'");
+    public List<ClienteResponse> consultarClientes(ClienteConsultaRequest criterios) {
+        LocalDate desde = criterios.getFechaCreacionDesde();
+        LocalDate hasta = criterios.getFechaCreacionHasta();
+        if (desde != null && hasta != null && desde.isAfter(hasta)) {
+            throw new NegocioException(CatalogoError.RANGO_FECHAS_INVALIDO);
         }
-        return clienteRepository.findByFechaCreacionBetween(desde, hasta).stream()
+
+        // El número de cuenta vive en otra tabla: se traduce al id del cliente dueño
+        Integer clienteIdDeLaCuenta = null;
+        if (criterios.getNumeroCuenta() != null) {
+            clienteIdDeLaCuenta = cuentaRepository.findByNumeroCuenta(criterios.getNumeroCuenta())
+                    .map(Cuenta::getClienteId)
+                    .orElseThrow(() -> new NegocioException(
+                            CatalogoError.CUENTA_NO_ENCONTRADA, criterios.getNumeroCuenta()));
+        }
+
+        List<Cliente> clientes = clienteRepository.findAll(
+                construirFiltro(criterios, clienteIdDeLaCuenta), Sort.by("id"));
+
+        // Si se buscó por un dato único (id, CURP, RFC, correo) y no existe, es un 404;
+        // para filtros generales (nombre, activo, fechas...) sin resultados se regresa lista vacía.
+        boolean buscaDatoUnico = criterios.getId() != null || criterios.getCurp() != null
+                || criterios.getRfc() != null || criterios.getCorreoElectronico() != null;
+        if (clientes.isEmpty() && buscaDatoUnico) {
+            throw new NegocioException(CatalogoError.CLIENTE_NO_ENCONTRADO, "con los criterios de búsqueda indicados");
+        }
+
+        return clientes.stream()
                 .map(this::armarResponseCompleto)
                 .toList();
     }
 
+    // Consulta dinámica: solo se agrega una condición por cada criterio que venga en el request.
+    private Specification<Cliente> construirFiltro(ClienteConsultaRequest c, Integer clienteIdDeLaCuenta) {
+        return (root, query, cb) -> {
+            List<Predicate> condiciones = new ArrayList<>();
+            if (c.getId() != null) {
+                condiciones.add(cb.equal(root.get("id"), c.getId()));
+            }
+            if (clienteIdDeLaCuenta != null) {
+                condiciones.add(cb.equal(root.get("id"), clienteIdDeLaCuenta));
+            }
+            if (c.getNombre() != null) {
+                condiciones.add(contiene(cb, root.get("nombre"), c.getNombre()));
+            }
+            if (c.getApellidoPaterno() != null) {
+                condiciones.add(contiene(cb, root.get("apellidoPaterno"), c.getApellidoPaterno()));
+            }
+            if (c.getApellidoMaterno() != null) {
+                condiciones.add(contiene(cb, root.get("apellidoMaterno"), c.getApellidoMaterno()));
+            }
+            if (c.getCurp() != null) {
+                condiciones.add(cb.equal(root.get("curp"), c.getCurp()));
+            }
+            if (c.getRfc() != null) {
+                condiciones.add(cb.equal(root.get("rfc"), c.getRfc()));
+            }
+            if (c.getCorreoElectronico() != null) {
+                condiciones.add(cb.equal(root.get("correoElectronico"), c.getCorreoElectronico()));
+            }
+            if (c.getActivo() != null) {
+                condiciones.add(cb.equal(root.get("activo"), c.getActivo()));
+            }
+            if (c.getFechaCreacionDesde() != null) {
+                condiciones.add(cb.greaterThanOrEqualTo(root.<LocalDateTime>get("fechaCreacion"),
+                        c.getFechaCreacionDesde().atStartOfDay()));
+            }
+            if (c.getFechaCreacionHasta() != null) {
+                // Incluye todo el día "hasta": menor al inicio del día siguiente
+                condiciones.add(cb.lessThan(root.<LocalDateTime>get("fechaCreacion"),
+                        c.getFechaCreacionHasta().plusDays(1).atStartOfDay()));
+            }
+            return cb.and(condiciones.toArray(new Predicate[0]));
+        };
+    }
+
+    private Predicate contiene(CriteriaBuilder cb, Expression<String> campo, String texto) {
+        return cb.like(cb.lower(campo), "%" + texto.toLowerCase(Locale.ROOT) + "%");
+    }
+
     @Override
-    public ClienteResponse actualizarCliente(Integer id, ClienteUpdateRequest request) {
+    public ClienteResponse actualizarCliente(ClienteUpdateRequest request) {
+        Integer id = request.getId();
         log.info("Iniciando actualización de cliente, clienteId={}", id);
 
         Cliente cliente = obtenerClienteOLanzar(id);
@@ -195,13 +220,14 @@ public class ClienteServiceImpl implements ClienteService {
         // El correo sí se puede actualizar, pero sigue debiendo ser único
         if (!cliente.getCorreoElectronico().equalsIgnoreCase(request.getCorreoElectronico())
                 && clienteRepository.existsByCorreoElectronico(request.getCorreoElectronico())) {
-            throw new ClienteYaRegistradoException(
-                    "Ya existe un cliente registrado con el correo " + request.getCorreoElectronico(),
-                    "correoElectronico");
+            throw new NegocioException(CatalogoError.CORREO_DUPLICADO, request.getCorreoElectronico());
         }
         cliente.setCorreoElectronico(request.getCorreoElectronico());
         cliente.setTelefonoMovil(request.getTelefonoMovil());
         cliente.setTelefonoAlternativo(request.getTelefonoAlternativo());
+        if (request.getActivo() != null) {
+            cliente.setActivo(request.getActivo());
+        }
 
         cliente = clienteRepository.save(cliente);
 
@@ -213,24 +239,12 @@ public class ClienteServiceImpl implements ClienteService {
         log.info("Actualización de cliente finalizada, clienteId={}", id);
 
         Cuenta cuenta = cuentaRepository.findByClienteId(id).orElse(null);
-        return mapearResponse(cliente, domicilio, cuenta, true);
-    }
-
-    @Override
-    public void darDeBajaCliente(Integer id) {
-        log.info("Iniciando baja lógica de cliente, clienteId={}", id);
-
-        Cliente cliente = obtenerClienteOLanzar(id);
-        cliente.setActivo(false);
-        clienteRepository.save(cliente);
-
         // Regla de negocio: "Solo los clientes activos podrán tener cuentas activas"
-        cuentaRepository.findByClienteId(id).ifPresent(cuenta -> {
-            cuenta.setEstatus(Cuenta.ESTATUS_INACTIVA);
-            cuentaRepository.save(cuenta);
-        });
-
-        log.info("Baja lógica de cliente finalizada, clienteId={}", id);
+        if (request.getActivo() != null && cuenta != null) {
+            cuenta.setEstatus(request.getActivo() ? Cuenta.ESTATUS_ACTIVA : Cuenta.ESTATUS_INACTIVA);
+            cuenta = cuentaRepository.save(cuenta);
+        }
+        return mapearResponse(cliente, domicilio, cuenta, true);
     }
 
     // ------------------------------------------------------------------
@@ -241,20 +255,17 @@ public class ClienteServiceImpl implements ClienteService {
     private void validarEdad(LocalDate fechaNacimiento) {
         int edad = Period.between(fechaNacimiento, LocalDate.now()).getYears();
         if (edad < EDAD_MINIMA) {
-            throw new ValidacionException("El cliente debe ser mayor de edad (18 años o más)", "fechaNacimiento");
+            throw new NegocioException(CatalogoError.CLIENTE_MENOR_DE_EDAD);
         }
         if (edad > EDAD_MAXIMA) {
-            throw new ValidacionException(
-                    "La fecha de nacimiento no es válida: la edad no puede ser mayor a " + EDAD_MAXIMA + " años",
-                    "fechaNacimiento");
+            throw new NegocioException(CatalogoError.EDAD_MAXIMA_EXCEDIDA, EDAD_MAXIMA);
         }
     }
 
     // Teléfono alternativo opcional, pero si se captura no puede ser el mismo número que el móvil
     private void validarTelefonosDistintos(Long movil, Long alternativo) {
         if (alternativo != null && alternativo.equals(movil)) {
-            throw new ValidacionException(
-                    "El teléfono alternativo no puede ser igual al teléfono móvil", "telefonoAlternativo");
+            throw new NegocioException(CatalogoError.TELEFONOS_IGUALES);
         }
     }
 
@@ -283,31 +294,23 @@ public class ClienteServiceImpl implements ClienteService {
     private Integer resolverNacionalidad(List<NacionalidadRequest> nacionalidades) {
         NacionalidadRequest capturada = nacionalidades.get(0);
         Nacionalidad catalogo = nacionalidadRepository.findById(capturada.getId())
-                .orElseThrow(() -> new ValidacionException(
-                        "La nacionalidad indicada (id " + capturada.getId()
-                                + ") no existe en el catálogo. Consulta GET /nacionalidades para ver las nacionalidades disponibles.",
-                        "nacionalidad[0].id"));
+                .orElseThrow(() -> new NegocioException(CatalogoError.NACIONALIDAD_NO_EXISTE, capturada.getId()));
         if (!NacionalidadNombre.equivalentes(capturada.getNombre(), catalogo.getNombre())) {
-            throw new ValidacionException(
-                    "El nombre de la nacionalidad \"" + capturada.getNombre() + "\" no corresponde al id "
-                            + capturada.getId() + " del catálogo (\"" + catalogo.getNombre()
-                            + "\"). Puede escribirse en masculino o femenino, sin importar mayúsculas ni acentos.",
-                    "nacionalidad[0].nombre");
+            throw new NegocioException(CatalogoError.NACIONALIDAD_NOMBRE_NO_COINCIDE,
+                    capturada.getNombre(), capturada.getId(), catalogo.getNombre());
         }
         return catalogo.getId();
     }
 
     private void validarNoDuplicado(ClienteRequest request) {
         if (clienteRepository.existsByCurp(request.getCurp())) {
-            throw new CurpDuplicadaException(request.getCurp());
+            throw new NegocioException(CatalogoError.CURP_DUPLICADA, request.getCurp());
         }
         if (clienteRepository.existsByRfc(request.getRfc())) {
-            throw new RfcDuplicadoException(request.getRfc());
+            throw new NegocioException(CatalogoError.RFC_DUPLICADO, request.getRfc());
         }
         if (clienteRepository.existsByCorreoElectronico(request.getCorreoElectronico())) {
-            throw new ClienteYaRegistradoException(
-                    "Ya existe un cliente registrado con el correo " + request.getCorreoElectronico(),
-                    "correoElectronico");
+            throw new NegocioException(CatalogoError.CORREO_DUPLICADO, request.getCorreoElectronico());
         }
     }
 
@@ -315,7 +318,7 @@ public class ClienteServiceImpl implements ClienteService {
         if (saldoInicial.compareTo(BigDecimal.ZERO) < 0) {
             // Defensa adicional: el saldo inicial tampoco puede ser negativo,
             // ni siquiera si alguien cambia mal la configuración.
-            throw new ValidacionException("El saldo inicial configurado no puede ser negativo");
+            throw new NegocioException(CatalogoError.SALDO_INICIAL_NEGATIVO);
         }
 
         Cuenta cuenta = new Cuenta();
@@ -337,7 +340,7 @@ public class ClienteServiceImpl implements ClienteService {
 
     private Cliente obtenerClienteOLanzar(Integer id) {
         return clienteRepository.findById(id)
-                .orElseThrow(() -> new ClienteNoEncontradoException("id " + id));
+                .orElseThrow(() -> new NegocioException(CatalogoError.CLIENTE_NO_ENCONTRADO, "id " + id));
     }
 
     private ClienteResponse armarResponseCompleto(Cliente cliente) {
@@ -366,8 +369,7 @@ public class ClienteServiceImpl implements ClienteService {
 
     private List<NacionalidadResponse> mapearNacionalidad(Integer nacionalidadId) {
         Nacionalidad nacionalidad = nacionalidadRepository.findById(nacionalidadId)
-                .orElseThrow(() -> new ValidacionException(
-                        "El cliente tiene un nacionalidad_id (" + nacionalidadId + ") que ya no existe en el catálogo"));
+                .orElseThrow(() -> new NegocioException(CatalogoError.NACIONALIDAD_CLIENTE_INEXISTENTE, nacionalidadId));
         NacionalidadResponse response = new NacionalidadResponse();
         response.setId(nacionalidad.getId());
         response.setNombre(nacionalidad.getNombre());

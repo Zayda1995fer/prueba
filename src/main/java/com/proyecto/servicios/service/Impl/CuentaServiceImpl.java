@@ -1,7 +1,8 @@
 package com.proyecto.servicios.service.Impl;
 
+import com.proyecto.servicios.exception.NegocioException;
+import com.proyecto.servicios.exception.CatalogoError;
 import com.proyecto.servicios.entity.onboarding.Cuenta;
-import com.proyecto.servicios.exception.CuentaNoEncontradaException;
 import com.proyecto.servicios.model.onboarding.CuentaResponse;
 import com.proyecto.servicios.repositorys.onboarding.CuentaRepository;
 import com.proyecto.servicios.service.CuentaService;
@@ -41,6 +42,6 @@ public class CuentaServiceImpl implements CuentaService {
 
     private Cuenta obtenerCuentaOLanzar(String numeroCuenta) {
         return cuentaRepository.findByNumeroCuenta(numeroCuenta)
-                .orElseThrow(() -> new CuentaNoEncontradaException(numeroCuenta));
+                .orElseThrow(() -> new NegocioException(CatalogoError.CUENTA_NO_ENCONTRADA, numeroCuenta));
     }
 }
