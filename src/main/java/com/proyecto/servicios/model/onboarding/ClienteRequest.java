@@ -9,6 +9,7 @@ import lombok.Setter;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.List;
 import java.util.Locale;
 
 import static com.proyecto.servicios.validation.ReglasValidacion.*;
@@ -63,10 +64,12 @@ public class ClienteRequest {
     @Pattern(regexp = SEXO, message = "El sexo debe capturarse como \"H\" o \"M\"")
     private String sexo;
 
-    // Debe ser el id de una nacionalidad del catálogo (GET /nacionalidades)
+    // Arreglo con UN solo objeto { "id": ..., "nombre": ... } del catálogo (GET /nacionalidades)
     @NotNull(message = "La nacionalidad es obligatoria")
-    @Positive(message = "La nacionalidad debe ser un id positivo del catálogo")
-    private Integer nacionalidadId;
+    @Size(min = 1, max = 1,
+            message = "La nacionalidad debe capturarse como un arreglo con un solo objeto, por ejemplo [{\"id\": 1, \"nombre\": \"Mexicana\"}]")
+    @Valid
+    private List<@NotNull(message = "El objeto de la nacionalidad no puede ser nulo") NacionalidadRequest> nacionalidad;
 
     @NotBlank(message = "El estado civil es obligatorio")
     @Pattern(regexp = ESTADO_CIVIL,

@@ -1,9 +1,9 @@
 package com.proyecto.servicios.service.Impl;
 
+import com.proyecto.servicios.exception.CatalogoError;
+import com.proyecto.servicios.exception.NegocioException;
 import com.proyecto.servicios.entity.onboarding.DatosBiometricosLogin;
 import com.proyecto.servicios.entity.onboarding.Login;
-import com.proyecto.servicios.exception.CredencialesInvalidasException;
-import com.proyecto.servicios.exception.SesionExpiradaException;
 import com.proyecto.servicios.model.onboarding.LoginRequest;
 import com.proyecto.servicios.model.onboarding.LoginResponse;
 import com.proyecto.servicios.repositorys.onboarding.ClienteRepository;
@@ -26,7 +26,6 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
-import static reactor.core.publisher.Mono.when;
 
 @ExtendWith(MockitoExtension.class)
 class LoginServiceImplTest {
@@ -49,9 +48,6 @@ class LoginServiceImplTest {
         loginService = new LoginServiceImpl(
                 loginRepository, datosBiometricosLoginRepository, clienteRepository, passwordEncoder, cifradoService);
         ReflectionTestUtils.setField(loginService, "sessionTimeoutMinutes", 5L);
-
-        when(cifradoService.cifrar(anyString())).thenAnswer(inv -> "CIFRADO(" + inv.getArgument(0) + ")");
-        when(cifradoService.hashParaBusqueda(anyString())).thenAnswer(inv -> "HASH(" + inv.getArgument(0) + ")");
     }
 
     private Login loginDeEjemplo() {
@@ -71,6 +67,10 @@ class LoginServiceImplTest {
         request.setUsuario("juan.garcia");
         request.setContrasena("Password123");
 
+        // No probamos aquí el algoritmo de cifrado real (eso se cubre en
+        // CifradoServiceImplTest); solo simulamos su comportamiento.
+        when(cifradoService.cifrar(anyString())).thenAnswer(inv -> "CIFRADO(" + inv.getArgument(0) + ")");
+        when(cifradoService.hashParaBusqueda(anyString())).thenAnswer(inv -> "HASH(" + inv.getArgument(0) + ")");
         when(loginRepository.findByUsuario("juan.garcia")).thenReturn(Optional.of(login));
         when(passwordEncoder.matches("Password123", "hash-guardado")).thenReturn(true);
         when(datosBiometricosLoginRepository.findByLoginId(1)).thenReturn(Optional.empty());
@@ -79,9 +79,12 @@ class LoginServiceImplTest {
 
         LoginResponse response = loginService.autenticar(request);
 
+        // La respuesta al cliente lleva el token EN CLARO (es lo que va a usar)
         assertThat(response.getTokenSesion()).isNotBlank();
         assertThat(response.getDuracionSesionMinutos()).isEqualTo(5);
 
+        // Pero lo que se guardó en la "base de datos" (el mock) está cifrado/hasheado,
+        // nunca el token plano
         var captor = org.mockito.ArgumentCaptor.forClass(DatosBiometricosLogin.class);
         org.mockito.Mockito.verify(datosBiometricosLoginRepository).save(captor.capture());
         assertThat(captor.getValue().getTokenSesionCifrado()).startsWith("CIFRADO(");
@@ -98,7 +101,7 @@ class LoginServiceImplTest {
         when(loginRepository.findByUsuario("no-existe")).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> loginService.autenticar(request))
-                .isInstanceOf(CredencialesInvalidasException.class);
+                .isInstanceOfSatisfying(NegocioException.class, ex -> assertThat(ex.getError()).isEqualTo(CatalogoError.CREDENCIALES_INVALIDAS));
     }
 
     @Test
@@ -112,7 +115,7 @@ class LoginServiceImplTest {
         when(passwordEncoder.matches("incorrecta", "hash-guardado")).thenReturn(false);
 
         assertThatThrownBy(() -> loginService.autenticar(request))
-                .isInstanceOf(CredencialesInvalidasException.class);
+                .isInstanceOfSatisfying(NegocioException.class, ex -> assertThat(ex.getError()).isEqualTo(CatalogoError.CREDENCIALES_INVALIDAS));
     }
 
     @Test
@@ -126,7 +129,7 @@ class LoginServiceImplTest {
         when(loginRepository.findByUsuario("juan.garcia")).thenReturn(Optional.of(login));
 
         assertThatThrownBy(() -> loginService.autenticar(request))
-                .isInstanceOf(CredencialesInvalidasException.class)
+                .isInstanceOfSatisfying(NegocioException.class, ex -> assertThat(ex.getError()).isEqualTo(CatalogoError.ACCESO_INACTIVO))
                 .hasMessageContaining("inactivo");
     }
 
@@ -139,6 +142,7 @@ class LoginServiceImplTest {
 
         Login login = loginDeEjemplo();
 
+        when(cifradoService.hashParaBusqueda("token-123")).thenReturn("HASH(token-123)");
         when(datosBiometricosLoginRepository.findByTokenSesionHash("HASH(token-123)"))
                 .thenReturn(Optional.of(datos));
         when(datosBiometricosLoginRepository.save(datos)).thenReturn(datos);
@@ -156,19 +160,21 @@ class LoginServiceImplTest {
         datos.setTokenSesionHash("HASH(token-123)");
         datos.setUltimaActividad(LocalDateTime.now().minusMinutes(6));
 
+        when(cifradoService.hashParaBusqueda("token-123")).thenReturn("HASH(token-123)");
         when(datosBiometricosLoginRepository.findByTokenSesionHash("HASH(token-123)"))
                 .thenReturn(Optional.of(datos));
 
         assertThatThrownBy(() -> loginService.validarSesion("token-123"))
-                .isInstanceOf(SesionExpiradaException.class);
+                .isInstanceOfSatisfying(NegocioException.class, ex -> assertThat(ex.getError()).isEqualTo(CatalogoError.SESION_EXPIRADA));
     }
 
     @Test
     void validarSesion_tokenInexistente_lanzaCredencialesInvalidas() {
+        when(cifradoService.hashParaBusqueda("token-falso")).thenReturn("HASH(token-falso)");
         when(datosBiometricosLoginRepository.findByTokenSesionHash("HASH(token-falso)"))
                 .thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> loginService.validarSesion("token-falso"))
-                .isInstanceOf(CredencialesInvalidasException.class);
+                .isInstanceOfSatisfying(NegocioException.class, ex -> assertThat(ex.getError()).isEqualTo(CatalogoError.TOKEN_INVALIDO));
     }
 }

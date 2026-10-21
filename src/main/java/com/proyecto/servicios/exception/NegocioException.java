@@ -2,27 +2,35 @@ package com.proyecto.servicios.exception;
 
 import org.springframework.http.HttpStatus;
 
-public abstract class NegocioException extends RuntimeException {
+/**
+ * Única excepción de negocio de la aplicación. En lugar de una clase por
+ * cada error, se indica qué pasó con una entrada de CatalogoError (que
+ * trae el código HTTP, el campo y el texto del mensaje) y, si el mensaje
+ * lo necesita, los valores que rellenan sus marcadores %s:
+ *
+ *     throw new NegocioException(CatalogoError.CURP_DUPLICADA, curp);
+ *
+ * GlobalExceptionHandler la atrapa una sola vez y arma la respuesta.
+ */
+public class NegocioException extends RuntimeException {
 
-    private final HttpStatus httpStatus;
-    private final String campo;
+    private final CatalogoError error;
 
-    protected NegocioException(String message, HttpStatus httpStatus) {
-        this(message, httpStatus, null);
+    public NegocioException(CatalogoError error, Object... argumentos) {
+        super(error.mensaje(argumentos));
+        this.error = error;
     }
 
-    protected NegocioException(String message, HttpStatus httpStatus, String campo) {
-        super(message);
-        this.httpStatus = httpStatus;
-        this.campo = campo;
+    public CatalogoError getError() {
+        return error;
     }
 
     public HttpStatus getHttpStatus() {
-        return httpStatus;
+        return error.getHttpStatus();
     }
 
     /** Nombre del campo del request que originó el error; null si no aplica a un campo. */
     public String getCampo() {
-        return campo;
+        return error.getCampo();
     }
 }

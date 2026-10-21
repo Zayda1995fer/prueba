@@ -55,8 +55,6 @@ import java.util.stream.Collectors;
 @Slf4j
 public class GlobalExceptionHandler {
 
-    private static final String MENSAJE_VALIDACION = "Error de validación";
-
     // ------------------------------------------------------------------
     // Reglas de negocio (duplicados, no encontrado, credenciales, ...)
     // ------------------------------------------------------------------
@@ -133,14 +131,18 @@ public class GlobalExceptionHandler {
 
         if (causa instanceof UnrecognizedPropertyException desconocida) {
             campo = rutaCompleta(desconocida) ;
-            mensaje = "El campo '" + desconocida.getPropertyName() + "' no está permitido en esta petición";
+            // Si el campo desconocido viene dentro de un objeto (p. ej. domicilio), se indica de cuál.
+            String objeto = rutaObjetoPadre(campo);
+            mensaje = objeto == null
+                    ? CatalogoError.CAMPO_NO_PERMITIDO.mensaje(desconocida.getPropertyName())
+                    : CatalogoError.CAMPO_NO_PERMITIDO_EN_OBJETO.mensaje(desconocida.getPropertyName(), objeto);
         } else if (causa instanceof JsonMappingException mapeo) {
             campo = rutaCompleta(mapeo);
             mensaje = mensajePorTipo(campo, mapeo);
         } else if (causa instanceof JsonProcessingException) {
-            mensaje = "El cuerpo de la petición no es un JSON válido";
+            mensaje = CatalogoError.JSON_INVALIDO.mensaje();
         } else {
-            mensaje = "El cuerpo de la petición es obligatorio y debe ser un JSON válido";
+            mensaje = CatalogoError.CUERPO_OBLIGATORIO.mensaje();
         }
 
         // Se registra solo el campo y el tipo de error, nunca el contenido
@@ -179,9 +181,8 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(HttpMediaTypeNotSupportedException.class)
     public ResponseEntity<ErrorRespuesta> manejarContentType(HttpMediaTypeNotSupportedException ex) {
         log.error("Content-Type no soportado: {}", ex.getContentType());
-        ErrorRespuesta respuesta = base(HttpStatus.UNSUPPORTED_MEDIA_TYPE,
-                "El Content-Type de la petición debe ser application/json");
-        return ResponseEntity.status(HttpStatus.UNSUPPORTED_MEDIA_TYPE).body(respuesta);
+        return ResponseEntity.status(HttpStatus.UNSUPPORTED_MEDIA_TYPE)
+                .body(base(CatalogoError.CONTENT_TYPE_INVALIDO));
     }
 
     // Última defensa: si algo llegara a la base de datos y una restricción
@@ -190,9 +191,7 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(DataIntegrityViolationException.class)
     public ResponseEntity<ErrorRespuesta> manejarIntegridad(DataIntegrityViolationException ex) {
         log.error("Violación de integridad en base de datos: {}", ex.getMostSpecificCause().getClass().getSimpleName());
-        ErrorRespuesta respuesta = base(HttpStatus.CONFLICT,
-                "Los datos enviados ya existen o no cumplen una regla de integridad");
-        return ResponseEntity.status(HttpStatus.CONFLICT).body(respuesta);
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(base(CatalogoError.INTEGRIDAD_DATOS));
     }
 
     // ------------------------------------------------------------------
@@ -212,33 +211,35 @@ public class GlobalExceptionHandler {
         if (status.is5xxServerError()) {
             log.error("Error interno de servlet", ex);
         }
-        String mensaje;
+        CatalogoError error;
         if (status == HttpStatus.NOT_FOUND) {
-            mensaje = "El recurso solicitado no existe";
+            error = CatalogoError.RECURSO_NO_EXISTE;
         } else if (status == HttpStatus.METHOD_NOT_ALLOWED) {
-            mensaje = "El método HTTP no está permitido para esta ruta";
+            error = CatalogoError.METODO_NO_PERMITIDO;
         } else if (status == HttpStatus.NOT_ACCEPTABLE) {
-            mensaje = "El formato de respuesta solicitado no está disponible";
+            error = CatalogoError.FORMATO_NO_DISPONIBLE;
         } else if (status.is4xxClientError()) {
-            mensaje = "La petición no es válida";
+            error = CatalogoError.PETICION_INVALIDA;
         } else {
-            mensaje = "Ocurrió un error interno. Intenta de nuevo más tarde";
+            error = CatalogoError.ERROR_INTERNO;
         }
-        return ResponseEntity.status(status).body(base(status, mensaje));
+        return ResponseEntity.status(status).body(base(status, error.mensaje()));
     }
 
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ErrorRespuesta> manejarErrorInesperado(Exception ex) {
         // La traza completa queda SOLO en el log del servidor
         log.error("Error interno no controlado", ex);
-        ErrorRespuesta respuesta = base(HttpStatus.INTERNAL_SERVER_ERROR,
-                "Ocurrió un error interno. Intenta de nuevo más tarde");
-        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(respuesta);
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(base(CatalogoError.ERROR_INTERNO));
     }
 
     // ------------------------------------------------------------------
     // Apoyo
     // ------------------------------------------------------------------
+
+    private ErrorRespuesta base(CatalogoError error) {
+        return base(error.getHttpStatus(), error.mensaje());
+    }
 
     private ErrorRespuesta base(HttpStatus status, String mensaje) {
         ErrorRespuesta respuesta = new ErrorRespuesta();
@@ -257,9 +258,12 @@ public class GlobalExceptionHandler {
         log.error("Error de validación de datos de entrada: {} error(es), se reporta el primero: {}",
                 hallazgos.size(), primero == null ? "n/a" : primero.campo() + " -> " + primero.mensaje());
 
-        ErrorRespuesta respuesta = base(HttpStatus.BAD_REQUEST, MENSAJE_VALIDACION);
+        ErrorRespuesta respuesta = base(CatalogoError.ERROR_VALIDACION);
         if (primero != null) {
-            respuesta.setErrors(List.of(new ErrorCampo(primero.campo(), primero.mensaje())));
+            ErrorCampo error = new ErrorCampo();
+            error.setField(primero.campo());
+            error.setMessage(primero.mensaje());
+            respuesta.setErrors(List.of(error));
         }
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(respuesta);
     }
@@ -276,6 +280,15 @@ public class GlobalExceptionHandler {
         return ruta.isEmpty() ? null : ruta;
     }
 
+    // "domicilio.xyz" -> "domicilio"; "nacionalidad[0].xyz" -> "nacionalidad[0]"; "xyz" -> null
+    private String rutaObjetoPadre(String ruta) {
+        if (ruta == null) {
+            return null;
+        }
+        int punto = ruta.lastIndexOf('.');
+        return punto < 0 ? null : ruta.substring(0, punto);
+    }
+
     private String mensajePorTipo(String campo, JsonMappingException ex) {
         String nombre = campo == null ? "el campo" : "'" + campo + "'";
         String minusculas = campo == null ? "" : campo.toLowerCase();
@@ -287,6 +300,13 @@ public class GlobalExceptionHandler {
         Class<?> destino = ex instanceof MismatchedInputException mismatched ? mismatched.getTargetType() : null;
         if (destino == null) {
             return "El valor de " + nombre + " no tiene un formato válido";
+        }
+        // Propiedades que son objetos o arreglos (domicilio, nacionalidad)
+        if (java.util.Collection.class.isAssignableFrom(destino) || destino.isArray()) {
+            return "El objeto " + nombre + " debe enviarse como un arreglo de objetos, por ejemplo [{\"id\": 1, \"nombre\": \"Mexicana\"}]";
+        }
+        if (!destino.isPrimitive() && !destino.getName().startsWith("java.") && !destino.isEnum()) {
+            return "El objeto " + nombre + " debe enviarse como un objeto JSON con sus propiedades entre llaves { }";
         }
         if (destino == LocalDate.class) {
             return "El valor de " + nombre + " debe ser una fecha real con formato AAAA-MM-DD";
@@ -321,6 +341,12 @@ public class GlobalExceptionHandler {
                     if (campos[i].getName().equals(nombre)) {
                         indice = i;
                         siguiente = campos[i].getType();
+                        if (List.class.isAssignableFrom(siguiente)
+                                && campos[i].getGenericType() instanceof java.lang.reflect.ParameterizedType pt
+                                && pt.getActualTypeArguments().length == 1
+                                && pt.getActualTypeArguments()[0] instanceof Class<?> elemento) {
+                            siguiente = elemento;   // List<NacionalidadRequest> -> NacionalidadRequest
+                        }
                         break;
                     }
                 }
