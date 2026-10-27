@@ -22,6 +22,7 @@ import org.springframework.web.ErrorResponse;
 import org.springframework.web.ErrorResponseException;
 import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingRequestHeaderException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -150,7 +151,12 @@ public class GlobalExceptionHandler {
         log.error("JSON de entrada inválido (campo: {}, causa: {})", campo,
                 causa == null ? "sin cuerpo" : causa.getClass().getSimpleName());
 
-        return respuestaValidacion(List.of(new Hallazgo(campo, mensaje, List.of(0))));
+        ResponseEntity<ErrorRespuesta> respuesta =
+                respuestaValidacion(List.of(new Hallazgo(campo, mensaje, List.of(0))));
+        if (causa instanceof UnrecognizedPropertyException) {
+            respuesta.getBody().setMessage(mensaje);
+        }
+        return respuesta;
     }
 
     @ExceptionHandler(MethodArgumentTypeMismatchException.class)
@@ -176,6 +182,16 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ErrorRespuesta> manejarParametroFaltante(MissingServletRequestParameterException ex) {
         return respuestaValidacion(List.of(new Hallazgo(ex.getParameterName(),
                 "El parámetro '" + ex.getParameterName() + "' es obligatorio", List.of(0))));
+    }
+
+    // Cabecera obligatoria ausente (header exception)
+    @ExceptionHandler(MissingRequestHeaderException.class)
+    public ResponseEntity<ErrorRespuesta> manejarCabeceraFaltante(MissingRequestHeaderException ex) {
+        log.error("Cabecera obligatoria ausente: {}", ex.getHeaderName());
+        ErrorRespuesta respuesta = base(CatalogoError.CABECERA_OBLIGATORIA.getHttpStatus(),
+                CatalogoError.CABECERA_OBLIGATORIA.mensaje(ex.getHeaderName()));
+        respuesta.setField(ex.getHeaderName());
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(respuesta);
     }
 
     @ExceptionHandler(HttpMediaTypeNotSupportedException.class)

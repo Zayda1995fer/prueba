@@ -28,11 +28,11 @@ public class ProductServiceImpl implements ProductService {
 
     // Estos dos datos identifican nuestra cuenta ante GestoPago.
     // Vienen del archivo application.properties, no están escritos aquí.
-    @Value("${gestopago.auth.id-distribuidor}")
-    private Integer idDistribuidor;
+    @Value("${gestopago.auth.id-distribuidor:0}")
+    private Integer idDistribuidor = 0;
 
-    @Value("${gestopago.auth.codigo-dispositivo}")
-    private String codigoDispositivo;
+    @Value("${gestopago.auth.codigo-dispositivo:}")
+    private String codigoDispositivo = "";
 
     public ProductServiceImpl(GestoPagoProductClient productClient, GestoPagoTokenService tokenService) {
         this.productClient = productClient;
@@ -46,8 +46,11 @@ public class ProductServiceImpl implements ProductService {
         log.info("Iniciando consulta del catálogo de productos");
 
         // 2) Buscamos el token que ya tenemos guardado (no lo escribimos a mano en ningún lado)
+        Integer idDistribuidorActual = idDistribuidor != null ? idDistribuidor : 0;
+        String codigoDispositivoActual = codigoDispositivo != null ? codigoDispositivo : "";
+
         Optional<GestoPagoToken> tokenGuardado =
-                tokenService.obtenerTokenActivo(idDistribuidor, codigoDispositivo);
+                tokenService.obtenerTokenActivo(idDistribuidorActual, codigoDispositivoActual);
 
         if (tokenGuardado.isEmpty()) {
             log.error("No hay un token disponible para consultar productos");
