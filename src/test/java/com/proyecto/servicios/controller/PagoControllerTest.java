@@ -2,6 +2,7 @@ package com.proyecto.servicios.controller;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import com.proyecto.servicios.config.SesionInterceptor;
 import com.proyecto.servicios.config.WebConfig;
 import com.proyecto.servicios.exception.CatalogoError;
 import com.proyecto.servicios.exception.GlobalExceptionHandler;
@@ -9,12 +10,14 @@ import com.proyecto.servicios.exception.NegocioException;
 import com.proyecto.servicios.model.onboarding.Codigo2faResponse;
 import com.proyecto.servicios.model.onboarding.PagoResponse;
 import com.proyecto.servicios.service.DobleFactorService;
+import com.proyecto.servicios.service.LoginService;
 import com.proyecto.servicios.service.PagoService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.converter.json.MappingJackson2HttpMessageConverter;
 import org.springframework.test.web.servlet.MockMvc;
@@ -23,6 +26,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.validation.beanvalidation.LocalValidatorFactoryBean;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestAttribute;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 
@@ -38,6 +42,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.not;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -48,17 +55,22 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class PagoControllerTest {
 
     private static final String ID_SOLICITUD = "3f2b8c1e-9a4d-4c7e-8b21-5d6e7f8a9b0c";
+    private static final String TOKEN_SESION = "11111111-2222-3333-4444-555555555555";
 
     @Mock
     private PagoService pagoService;
     @Mock
     private DobleFactorService dobleFactorService;
+    @Mock
+    private LoginService loginService;
 
     private final ObjectMapper escritor = new ObjectMapper().registerModule(new JavaTimeModule());
     private MockMvc mvc;
 
     @BeforeEach
     void setUp() {
+        // Sesión válida del cliente 5 en todas las peticiones (los casos sin sesión están en SesionInterceptorTest)
+        lenient().when(loginService.validarSesion(TOKEN_SESION)).thenReturn(5);
         ObjectMapper estricto = WebConfig.crearMapperEstricto(new ObjectMapper().registerModule(new JavaTimeModule()));
         LocalValidatorFactoryBean validador = new LocalValidatorFactoryBean();
         validador.afterPropertiesSet();
@@ -66,7 +78,34 @@ class PagoControllerTest {
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .setMessageConverters(new MappingJackson2HttpMessageConverter(estricto))
                 .setValidator(validador)
+                .addInterceptors(new SesionInterceptor(loginService))
+                .defaultRequest(post("/").header(HttpHeaders.AUTHORIZATION, "Bearer " + TOKEN_SESION))
                 .build();
+    }
+
+    @Test
+    void elClienteDeLaSesionLlegaAlServicio() throws Exception {
+        when(pagoService.pagar(any(), any())).thenReturn(respuesta("EXITOSO"));
+        pagar(cuerpoLuz()).andExpect(status().isCreated());
+        verify(pagoService).pagar(any(), eq(5));
+    }
+
+    @Test
+    void sinCabeceraDeSesion_respondeUnauthorizedYNoLlamaAlServicio() throws Exception {
+        MockMvc sinSesion = MockMvcBuilders.standaloneSetup(new PagoController(pagoService, dobleFactorService))
+                .setControllerAdvice(new GlobalExceptionHandler())
+                .addInterceptors(new SesionInterceptor(loginService))
+                .build();
+        sinSesion.perform(post("/pagos").contentType(MediaType.APPLICATION_JSON)
+                        .content(escritor.writeValueAsString(cuerpoLuz())))
+                .andExpect(status().isUnauthorized());
+        verifyNoInteractions(pagoService);
+    }
+
+    @Test
+    void sesionDeOtroCliente_respondeForbidden() throws Exception {
+        servicioLanza(CatalogoError.OPERACION_NO_AUTORIZADA);
+        pagar(cuerpoLuz()).andExpect(status().isForbidden());
     }
 
     // ---------------- datos de prueba ----------------
@@ -101,7 +140,7 @@ class PagoControllerTest {
 
     @Test
     void pagoConfirmado_respondeCreated() throws Exception {
-        when(pagoService.pagar(any())).thenReturn(respuesta("EXITOSO"));
+        when(pagoService.pagar(any(), any())).thenReturn(respuesta("EXITOSO"));
 
         pagar(cuerpoLuz())
                 .andExpect(status().isCreated())
@@ -112,7 +151,7 @@ class PagoControllerTest {
 
     @Test
     void pagoPorConciliar_respondeAcceptedYExplicaQueElSaldoQuedaRetenido() throws Exception {
-        when(pagoService.pagar(any())).thenReturn(respuesta("POR_CONCILIAR"));
+        when(pagoService.pagar(any(), any())).thenReturn(respuesta("POR_CONCILIAR"));
 
         pagar(cuerpoLuz())
                 .andExpect(status().isAccepted())
@@ -123,7 +162,7 @@ class PagoControllerTest {
 
     @Test
     void consultar_respondeOk() throws Exception {
-        when(pagoService.consultarPago(any())).thenReturn(respuesta("EXITOSO"));
+        when(pagoService.consultarPago(any(), any())).thenReturn(respuesta("EXITOSO"));
 
         mvc.perform(post("/pagos/consultar").contentType(MediaType.APPLICATION_JSON)
                         .content("{\"idSolicitud\":\"" + ID_SOLICITUD + "\",\"idUser\":5}"))
@@ -136,7 +175,7 @@ class PagoControllerTest {
         Codigo2faResponse response = new Codigo2faResponse();
         response.setCodigo("123456");
         response.setVigenciaMinutos(5);
-        when(dobleFactorService.solicitar(any())).thenReturn(response);
+        when(dobleFactorService.solicitar(any(), any())).thenReturn(response);
 
         mvc.perform(post("/pagos/2fa").contentType(MediaType.APPLICATION_JSON)
                         .content("{\"numeroCuenta\":\"1234567890\",\"idUser\":5}"))
@@ -249,7 +288,7 @@ class PagoControllerTest {
     // ---------------- cada error del negocio tiene su código HTTP ----------------
 
     private void servicioLanza(CatalogoError error, Object... args) {
-        when(pagoService.pagar(any())).thenThrow(new NegocioException(error, args));
+        when(pagoService.pagar(any(), any())).thenThrow(new NegocioException(error, args));
     }
 
     @Test
@@ -316,7 +355,7 @@ class PagoControllerTest {
 
     @Test
     void errorInesperado_respondeInternalErrorSinFiltrarDetallesTecnicos() throws Exception {
-        when(pagoService.pagar(any())).thenThrow(new IllegalStateException("jdbc:postgresql://host password=secreto"));
+        when(pagoService.pagar(any(), any())).thenThrow(new IllegalStateException("jdbc:postgresql://host password=secreto"));
 
         pagar(cuerpoLuz()).andExpect(status().isInternalServerError())
                 .andExpect(jsonPath("$.message").value(not(containsString("secreto"))))
@@ -335,7 +374,9 @@ class PagoControllerTest {
             for (Parameter p : endpoint.getParameters()) {
                 assertThat(p.isAnnotationPresent(PathVariable.class)).isFalse();
                 assertThat(p.isAnnotationPresent(RequestParam.class)).isFalse();
-                assertThat(p.isAnnotationPresent(RequestBody.class)).isTrue();
+                // Datos del cliente en el body; el cliente autenticado lo pone el servidor (SesionInterceptor)
+                assertThat(p.isAnnotationPresent(RequestBody.class) || p.isAnnotationPresent(RequestAttribute.class))
+                        .isTrue();
             }
         }
     }

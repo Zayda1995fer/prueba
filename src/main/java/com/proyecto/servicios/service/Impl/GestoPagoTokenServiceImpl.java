@@ -2,9 +2,11 @@ package com.proyecto.servicios.service.Impl;
 
 import com.proyecto.servicios.client.GestoPagoAuthClient;
 import com.proyecto.servicios.entity.gestopago.GestoPagoToken;
+import com.proyecto.servicios.exception.NegocioException;
 import com.proyecto.servicios.mapper.GestoPagoTokenMapper;
 import com.proyecto.servicios.model.gestopago.GestoPagoAuthResponse;
 import com.proyecto.servicios.repositorys.gestopago.GestoPagoTokenRepository;
+import com.proyecto.servicios.service.CifradoService;
 import com.proyecto.servicios.service.GestoPagoTokenService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -20,6 +22,7 @@ public class GestoPagoTokenServiceImpl implements GestoPagoTokenService {
     private final GestoPagoAuthClient gestoPagoAuthClient;
     private final GestoPagoTokenRepository tokenRepository;
     private final GestoPagoTokenMapper tokenMapper;
+    private final CifradoService cifradoService;
 
     @Value("${gestopago.auth.id-distribuidor}")
     private Integer idDistribuidor;
@@ -32,10 +35,12 @@ public class GestoPagoTokenServiceImpl implements GestoPagoTokenService {
 
     public GestoPagoTokenServiceImpl(GestoPagoAuthClient gestoPagoAuthClient,
                                      GestoPagoTokenRepository tokenRepository,
-                                     GestoPagoTokenMapper tokenMapper) {
+                                     GestoPagoTokenMapper tokenMapper,
+                                     CifradoService cifradoService) {
         this.gestoPagoAuthClient = gestoPagoAuthClient;
         this.tokenRepository = tokenRepository;
         this.tokenMapper = tokenMapper;
+        this.cifradoService = cifradoService;
     }
 
     @Override
@@ -65,6 +70,8 @@ public class GestoPagoTokenServiceImpl implements GestoPagoTokenService {
                         return nuevo;
                     });
 
+            // El token Bearer se guarda cifrado (AES-GCM): una copia de la BD no basta para usarlo
+            tokenEntity.setToken(cifradoService.cifrar(response.getToken()));
             tokenRepository.save(tokenEntity);
             log.info("Token GestoPago renovado correctamente");
 
@@ -74,8 +81,32 @@ public class GestoPagoTokenServiceImpl implements GestoPagoTokenService {
         }
     }
 
+    /**
+     * Devuelve una COPIA con el token ya descifrado (la entidad administrada se queda cifrada).
+     * Si no se puede descifrar (llave rotada o token guardado antes del cifrado) se trata
+     * como inexistente para que quien llama solicite uno nuevo.
+     */
     @Override
     public Optional<GestoPagoToken> obtenerTokenActivo(Integer idDistribuidor, String codigoDispositivo) {
-        return tokenRepository.findByIdDistribuidorAndCodigoDispositivo(idDistribuidor, codigoDispositivo);
+        return tokenRepository.findByIdDistribuidorAndCodigoDispositivo(idDistribuidor, codigoDispositivo)
+                .filter(t -> Boolean.TRUE.equals(t.getActivo()))
+                .flatMap(this::copiaDescifrada);
+    }
+
+    private Optional<GestoPagoToken> copiaDescifrada(GestoPagoToken guardado) {
+        try {
+            GestoPagoToken copia = new GestoPagoToken();
+            copia.setId(guardado.getId());
+            copia.setIdDistribuidor(guardado.getIdDistribuidor());
+            copia.setCodigoDispositivo(guardado.getCodigoDispositivo());
+            copia.setTokenType(guardado.getTokenType());
+            copia.setExpiresIn(guardado.getExpiresIn());
+            copia.setActivo(guardado.getActivo());
+            copia.setToken(cifradoService.descifrar(guardado.getToken()));
+            return Optional.of(copia);
+        } catch (NegocioException e) {
+            log.warn("El token GestoPago guardado no se pudo descifrar; se solicitará uno nuevo");
+            return Optional.empty();
+        }
     }
 }

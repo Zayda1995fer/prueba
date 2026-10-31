@@ -1,20 +1,26 @@
 package com.proyecto.servicios.controller;
 
+import com.proyecto.servicios.config.SesionInterceptor;
+import com.proyecto.servicios.model.onboarding.CuentaConsultaRequest;
 import com.proyecto.servicios.model.onboarding.CuentaResponse;
 import com.proyecto.servicios.service.CuentaService;
-import jakarta.validation.constraints.Pattern;
+import jakarta.validation.Valid;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestAttribute;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.math.BigDecimal;
 import java.util.List;
 
-import static com.proyecto.servicios.validation.ReglasValidacion.NUMERO_CUENTA;
-
+/**
+ * Todas las rutas exigen sesión (SesionInterceptor) y solo muestran cuentas del cliente autenticado.
+ * El número de cuenta viaja en el body: sin @PathVariable ni @RequestParam.
+ */
 @RestController
 @RequestMapping(value = "/cuentas", produces = MediaType.APPLICATION_JSON_VALUE)
 public class CuentaController {
@@ -25,25 +31,25 @@ public class CuentaController {
         this.cuentaService = cuentaService;
     }
 
-    // Endpoint mínimo solicitado
-    @GetMapping("/{numeroCuenta}")
+    @PostMapping(value = "/consultar", consumes = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<CuentaResponse> consultarPorNumeroCuenta(
-            @PathVariable @Pattern(regexp = NUMERO_CUENTA,
-                    message = "El número de cuenta debe tener exactamente 10 dígitos") String numeroCuenta) {
-        return ResponseEntity.ok(cuentaService.consultarPorNumeroCuenta(numeroCuenta));
+            @Valid @RequestBody CuentaConsultaRequest request,
+            @RequestAttribute(SesionInterceptor.CLIENTE_AUTENTICADO) Integer clienteAutenticado) {
+        return ResponseEntity.ok(cuentaService.consultarPorNumeroCuenta(request.getNumeroCuenta(), clienteAutenticado));
     }
 
-    // "Consultar cuentas activas"
+    // "Consultar cuentas activas" (del cliente autenticado)
     @GetMapping("/activas")
-    public ResponseEntity<List<CuentaResponse>> consultarActivas() {
-        return ResponseEntity.ok(cuentaService.consultarActivas());
+    public ResponseEntity<List<CuentaResponse>> consultarActivas(
+            @RequestAttribute(SesionInterceptor.CLIENTE_AUTENTICADO) Integer clienteAutenticado) {
+        return ResponseEntity.ok(cuentaService.consultarActivas(clienteAutenticado));
     }
 
     // "Consultar saldo de una cuenta"
-    @GetMapping("/{numeroCuenta}/saldo")
+    @PostMapping(value = "/saldo", consumes = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<BigDecimal> consultarSaldo(
-            @PathVariable @Pattern(regexp = NUMERO_CUENTA,
-                    message = "El número de cuenta debe tener exactamente 10 dígitos") String numeroCuenta) {
-        return ResponseEntity.ok(cuentaService.consultarSaldo(numeroCuenta));
+            @Valid @RequestBody CuentaConsultaRequest request,
+            @RequestAttribute(SesionInterceptor.CLIENTE_AUTENTICADO) Integer clienteAutenticado) {
+        return ResponseEntity.ok(cuentaService.consultarSaldo(request.getNumeroCuenta(), clienteAutenticado));
     }
 }

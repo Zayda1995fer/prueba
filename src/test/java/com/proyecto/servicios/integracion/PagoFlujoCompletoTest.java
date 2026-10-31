@@ -3,6 +3,7 @@ package com.proyecto.servicios.integracion;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.proyecto.servicios.client.GestoPagoTxClient;
+import com.proyecto.servicios.config.SesionInterceptor;
 import com.proyecto.servicios.config.WebConfig;
 import com.proyecto.servicios.controller.PagoController;
 import com.proyecto.servicios.entity.gestopago.GestoPagoToken;
@@ -20,6 +21,7 @@ import com.proyecto.servicios.repositorys.onboarding.PagoRepository;
 import com.proyecto.servicios.repositorys.onboarding.ProductoPagoRepository;
 import com.proyecto.servicios.service.DobleFactorService;
 import com.proyecto.servicios.service.GestoPagoTokenService;
+import com.proyecto.servicios.service.LoginService;
 import com.proyecto.servicios.service.Impl.ConciliacionServiceImpl;
 import com.proyecto.servicios.service.Impl.GestoPagoGatewayImpl;
 import com.proyecto.servicios.service.Impl.PagoServiceImpl;
@@ -35,6 +37,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.converter.json.MappingJackson2HttpMessageConverter;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -80,6 +83,7 @@ class PagoFlujoCompletoTest {
 
     private static final String SOLICITUD_1 = "3f2b8c1e-9a4d-4c7e-8b21-5d6e7f8a9b0c";
     private static final String SOLICITUD_2 = "11111111-2222-4333-8444-555555555555";
+    private static final String TOKEN_SESION = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
 
     @Mock
     private PagoRepository pagoRepository;
@@ -97,6 +101,8 @@ class PagoFlujoCompletoTest {
     private GestoPagoTxClient client;
     @Mock
     private GestoPagoTokenService tokenService;
+    @Mock
+    private LoginService loginService;
 
     // "Base de datos" en memoria
     private final Map<Integer, Pago> pagos = new LinkedHashMap<>();
@@ -131,6 +137,8 @@ class PagoFlujoCompletoTest {
         luz.setMontoMaximo(new BigDecimal("10000.00"));
         luz.setActivo(true);
 
+        // Sesión del cliente 5, titular de la cuenta
+        when(loginService.validarSesion(TOKEN_SESION)).thenReturn(5);
         when(cuentaRepository.buscarParaPago("1234567890")).thenReturn(Optional.of(cuenta));
         when(cuentaRepository.buscarPorIdParaActualizar(9)).thenReturn(Optional.of(cuenta));
         when(cuentaRepository.findById(9)).thenReturn(Optional.of(cuenta));
@@ -204,6 +212,8 @@ class PagoFlujoCompletoTest {
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .setMessageConverters(new MappingJackson2HttpMessageConverter(estricto))
                 .setValidator(validador)
+                .addInterceptors(new SesionInterceptor(loginService))
+                .defaultRequest(post("/").header(HttpHeaders.AUTHORIZATION, "Bearer " + TOKEN_SESION))
                 .build();
     }
 
@@ -252,6 +262,30 @@ class PagoFlujoCompletoTest {
     }
 
     // ---------------- escenarios ----------------
+
+    @Test
+    void sinSesion_respondeUnauthorizedYNoTocaElSaldo() throws Exception {
+        mvc.perform(post("/pagos").header(HttpHeaders.AUTHORIZATION, "")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(escritor.writeValueAsString(cuerpo(SOLICITUD_1, "350.00"))))
+                .andExpect(status().isUnauthorized());
+
+        assertThat(cuenta.getSaldo()).isEqualByComparingTo("2000.00");
+        assertThat(pagos).isEmpty();
+        verify(client, never()).enviarTx(anyString(), any());
+    }
+
+    @Test
+    void sesionDeOtroCliente_respondeForbiddenYNoTocaElSaldo() throws Exception {
+        // El cliente 6 tiene sesión válida pero intenta pagar con la cuenta del cliente 5
+        when(loginService.validarSesion(TOKEN_SESION)).thenReturn(6);
+
+        pagar(SOLICITUD_1, "350.00").andExpect(status().isForbidden());
+
+        assertThat(cuenta.getSaldo()).isEqualByComparingTo("2000.00");
+        assertThat(pagos).isEmpty();
+        verify(client, never()).enviarTx(anyString(), any());
+    }
 
     @Test
     void pagoExitoso_descuentaElSaldoGuardaElPagoYAvisaAlCliente() throws Exception {
