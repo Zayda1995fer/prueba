@@ -1,6 +1,6 @@
 # Pago de servicios con GestoPago
 
-## Endpoints (todos `POST` con `@RequestBody`)
+## Endpoints (todos `POST` con `@RequestBody` y cabecera `Authorization: Bearer <tokenSesion>`)
 
 | Endpoint | Para qué | Respuesta |
 |---|---|---|
@@ -25,6 +25,24 @@ Ejemplo de pago de luz (usa `referencia`; una recarga usaría `telefono`, nunca 
 
 `idSolicitud` es un UUID que genera quien llama. Es la llave de **idempotencia**: repetir la misma
 solicitud (por un timeout, un doble clic, un reintento) devuelve el resultado original y nunca cobra dos veces.
+
+## Identidad y autorización del cliente
+
+Todas las rutas de `/pagos` y `/cuentas` exigen la cabecera `Authorization: Bearer <tokenSesion>`
+(el token que entrega `POST /login`). `SesionInterceptor` la valida **antes** del controller:
+
+1. Sin cabecera o con otro esquema → **401** (`SESION_REQUERIDA`).
+2. Token con formato inválido → **401** sin consultar la base de datos.
+3. Token inexistente o vencido por inactividad → **401** (`TOKEN_INVALIDO` / `SESION_EXPIRADA`).
+4. Sesión válida → se renueva la ventana de inactividad y el id del cliente queda como atributo de la petición.
+
+El `idUser` del body **no se cree por sí solo**: el servicio lo compara con el cliente de la sesión
+(`VerificadorTitular`) y responde **403** (`OPERACION_NO_AUTORIZADA`) si no coinciden, antes de validar
+el catálogo, tocar el saldo o llamar al proveedor. Después se verifica que la cuenta sea de ese cliente,
+que cliente y cuenta estén activos, el saldo, los duplicados y el código 2FA.
+
+Las consultas de cuenta (`/cuentas/consultar`, `/cuentas/saldo`, `/cuentas/activas`) solo devuelven cuentas
+del cliente autenticado; una cuenta ajena responde igual que una inexistente (no se revela que existe).
 
 ## Estrategia de cobro: descontar primero, confirmar después
 
@@ -73,7 +91,8 @@ conciliación lo resuelve.
 
 ## Seguridad
 
-- **Token Bearer:** se obtiene con `authenticate` y se guarda en `gestopago_tokens`; nunca va en el código
+- **Token Bearer:** se obtiene con `authenticate` y se guarda **cifrado con AES-GCM** en `gestopago_tokens`
+  (solo se descifra en memoria al usarlo; un token que no se puede descifrar se renueva); nunca va en el código
   ni en respuestas. La contraseña de autenticación se lee de la variable de entorno `GESTOPAGO_PASSWORD`.
   Si el proveedor responde 401/403 se renueva el token y se reintenta **una** vez (no se procesó nada).
 - **Transporte:** la aplicación no arranca si la URL de GestoPago no es `https` (se permite `localhost`).
@@ -91,7 +110,11 @@ conciliación lo resuelve.
 |---|---|
 | `GESTOPAGO_PASSWORD` | Contraseña de autenticación con GestoPago (obligatoria) |
 | `MAIL_USUARIO` / `MAIL_CLAVE` / `NOTIFICACIONES_ACTIVO` | Aviso por correo (contraseña de aplicación de Gmail) |
-| `PAGOS_2FA_DEVOLVER_CODIGO` | `true` solo en práctica; en producción `false` |
+| `PAGOS_2FA_DEVOLVER_CODIGO` | `false` por defecto; `true` solo en práctica local |
+| `APP_AES_KEY` | Llave AES-256 en Base64 (`openssl rand -base64 32`). Obligatoria: sin ella no arranca |
+| `DB_URL` / `DB_USUARIO` / `DB_CLAVE` | Conexión a PostgreSQL (`DB_CLAVE` obligatoria) |
+
+Copia `.env.example` como `.env` (está en `.gitignore`) o configura las variables en IntelliJ / Render.
 
 Supuestos pendientes de confirmar con la documentación de GestoPago (`application.properties`):
 ruta de `sendTx` y de la consulta, código de éxito, códigos "en proceso" / "no aplicada", significado de `upc`.

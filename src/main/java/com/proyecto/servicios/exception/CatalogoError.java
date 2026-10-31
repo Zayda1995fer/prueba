@@ -25,11 +25,15 @@ public enum CatalogoError {
     CLIENTE_CON_ACCESO(HttpStatus.CONFLICT, null, "El cliente ya cuenta con credenciales de acceso"),
     INTEGRIDAD_DATOS(HttpStatus.CONFLICT, null, "Los datos enviados ya existen o no cumplen una regla de integridad"),
 
-    // ---------------- Autenticación / sesión (401, 429) ----------------
+    // ---------------- Autenticación / sesión (401, 403, 429) ----------------
     CREDENCIALES_INVALIDAS(HttpStatus.UNAUTHORIZED, null, "Usuario o contraseña incorrectos"),
     ACCESO_INACTIVO(HttpStatus.UNAUTHORIZED, null, "El acceso se encuentra inactivo"),
     TOKEN_INVALIDO(HttpStatus.UNAUTHORIZED, null, "Token de sesión inválido"),
     SESION_EXPIRADA(HttpStatus.UNAUTHORIZED, null, "La sesión expiró por inactividad (límite de %s minutos)"),
+    SESION_REQUERIDA(HttpStatus.UNAUTHORIZED, null,
+            "Se requiere una sesión activa: envía la cabecera Authorization: Bearer <tokenSesion>"),
+    OPERACION_NO_AUTORIZADA(HttpStatus.FORBIDDEN, null,
+            "La sesión activa no está autorizada para operar con los datos indicados"),
     DEMASIADOS_INTENTOS(HttpStatus.TOO_MANY_REQUESTS, null, "Demasiados intentos fallidos. Intenta de nuevo en %s minuto(s)"),
 
     // ---------------- Reglas de negocio de Clientes / Login (400) ----------------
