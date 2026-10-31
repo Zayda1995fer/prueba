@@ -9,6 +9,7 @@ import com.fasterxml.jackson.databind.type.LogicalType;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.converter.HttpMessageConverter;
 import org.springframework.http.converter.json.MappingJackson2HttpMessageConverter;
+import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
 import java.util.List;
@@ -17,9 +18,17 @@ import java.util.List;
 public class WebConfig implements WebMvcConfigurer {
 
     private final ObjectMapper objectMapperBase;
+    private final SesionInterceptor sesionInterceptor;
 
-    public WebConfig(ObjectMapper objectMapperBase) {
+    public WebConfig(ObjectMapper objectMapperBase, SesionInterceptor sesionInterceptor) {
         this.objectMapperBase = objectMapperBase;
+        this.sesionInterceptor = sesionInterceptor;
+    }
+
+    /** Operaciones con dinero o datos de cuenta: solo con una sesión válida (ver SesionInterceptor). */
+    @Override
+    public void addInterceptors(InterceptorRegistry registry) {
+        registry.addInterceptor(sesionInterceptor).addPathPatterns("/pagos", "/pagos/**", "/cuentas/**");
     }
 
     @Override

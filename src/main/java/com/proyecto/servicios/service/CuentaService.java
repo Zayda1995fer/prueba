@@ -7,9 +7,9 @@ import java.util.List;
 
 public interface CuentaService {
 
-    CuentaResponse consultarPorNumeroCuenta(String numeroCuenta);
+    CuentaResponse consultarPorNumeroCuenta(String numeroCuenta, Integer clienteAutenticado);
 
-    List<CuentaResponse> consultarActivas();
+    List<CuentaResponse> consultarActivas(Integer clienteAutenticado);
 
-    BigDecimal consultarSaldo(String numeroCuenta);
+    BigDecimal consultarSaldo(String numeroCuenta, Integer clienteAutenticado);
 }
