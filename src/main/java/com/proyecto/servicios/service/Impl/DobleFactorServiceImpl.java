@@ -12,6 +12,7 @@ import com.proyecto.servicios.repositorys.onboarding.Codigo2faRepository;
 import com.proyecto.servicios.repositorys.onboarding.CuentaRepository;
 import com.proyecto.servicios.service.CifradoService;
 import com.proyecto.servicios.service.DobleFactorService;
+import com.proyecto.servicios.validation.VerificadorTitular;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -54,7 +55,8 @@ public class DobleFactorServiceImpl implements DobleFactorService {
 
     @Override
     @Transactional(transactionManager = TM)
-    public Codigo2faResponse solicitar(Codigo2faRequest request) {
+    public Codigo2faResponse solicitar(Codigo2faRequest request, Integer clienteAutenticado) {
+        VerificadorTitular.verificar(clienteAutenticado, request.getIdUser());
         Cuenta cuenta = cuentaRepository.findByNumeroCuenta(request.getNumeroCuenta())
                 .orElseThrow(() -> new NegocioException(CatalogoError.CUENTA_NO_ENCONTRADA, request.getNumeroCuenta()));
         if (!cuenta.getClienteId().equals(request.getIdUser())) {

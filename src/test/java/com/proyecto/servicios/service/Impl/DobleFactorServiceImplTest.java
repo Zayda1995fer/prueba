@@ -115,7 +115,7 @@ class DobleFactorServiceImplTest {
         hashDePrueba();
         when(codigoRepository.save(any(Codigo2fa.class))).thenAnswer(inv -> inv.getArgument(0));
 
-        Codigo2faResponse response = servicio.solicitar(solicitud());
+        Codigo2faResponse response = servicio.solicitar(solicitud(), 5);
 
         assertThat(response.getCodigo()).matches("^[0-9]{6}$");
         assertThat(response.getVigenciaMinutos()).isEqualTo(5);
@@ -138,7 +138,13 @@ class DobleFactorServiceImplTest {
         hashDePrueba();
         when(codigoRepository.save(any(Codigo2fa.class))).thenAnswer(inv -> inv.getArgument(0));
 
-        assertThat(servicio.solicitar(solicitud()).getCodigo()).isNull();
+        assertThat(servicio.solicitar(solicitud(), 5).getCodigo()).isNull();
+    }
+
+    @Test
+    void solicitar_conSesionDeOtroCliente_seRechazaSinGenerarCodigo() {
+        assertError(() -> servicio.solicitar(solicitud(), 6), CatalogoError.OPERACION_NO_AUTORIZADA);
+        verify(codigoRepository, never()).save(any(Codigo2fa.class));
     }
 
     @Test
@@ -147,7 +153,7 @@ class DobleFactorServiceImplTest {
         Codigo2faRequest request = solicitud();
         request.setIdUser(99);
 
-        assertError(() -> servicio.solicitar(request), CatalogoError.CUENTA_NO_PERTENECE_AL_CLIENTE);
+        assertError(() -> servicio.solicitar(request, request.getIdUser()), CatalogoError.CUENTA_NO_PERTENECE_AL_CLIENTE);
         verify(codigoRepository, never()).save(any(Codigo2fa.class));
     }
 
@@ -156,7 +162,7 @@ class DobleFactorServiceImplTest {
         when(cuentaRepository.findByNumeroCuenta("1234567890")).thenReturn(Optional.of(cuenta()));
         when(clienteRepository.findById(5)).thenReturn(Optional.of(cliente(false)));
 
-        assertError(() -> servicio.solicitar(solicitud()), CatalogoError.PAGO_CLIENTE_INACTIVO);
+        assertError(() -> servicio.solicitar(solicitud(), 5), CatalogoError.PAGO_CLIENTE_INACTIVO);
     }
 
     // ---------------- validar ----------------

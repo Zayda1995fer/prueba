@@ -17,11 +17,13 @@ import com.proyecto.servicios.service.PagoService;
 import com.proyecto.servicios.service.PagoTransaccionService;
 import com.proyecto.servicios.service.PagoTransaccionService.Reserva;
 import com.proyecto.servicios.validation.ValidadorPago;
+import com.proyecto.servicios.validation.VerificadorTitular;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 /**
  * Orquesta el pago. Esta clase NO es transaccional a propósito:
+ *   0) verifica que el cliente de la sesión sea el titular de la solicitud,
  *   1) valida contra el catálogo,
  *   2) reserva el saldo (transacción corta),
  *   3) llama a GestoPago (sin transacción ni bloqueos abiertos),
@@ -52,7 +54,8 @@ public class PagoServiceImpl implements PagoService {
     }
 
     @Override
-    public PagoResponse pagar(PagoRequest request) {
+    public PagoResponse pagar(PagoRequest request, Integer clienteAutenticado) {
+        VerificadorTitular.verificar(clienteAutenticado, request.getIdUser());
         ProductoPago producto = validador.validar(request);
 
         Reserva reserva = transacciones.reservar(request, producto);
@@ -73,7 +76,8 @@ public class PagoServiceImpl implements PagoService {
     }
 
     @Override
-    public PagoResponse consultarPago(PagoConsultaRequest request) {
+    public PagoResponse consultarPago(PagoConsultaRequest request, Integer clienteAutenticado) {
+        VerificadorTitular.verificar(clienteAutenticado, request.getIdUser());
         Pago pago = pagoRepository.findByIdSolicitud(request.getIdSolicitud().toLowerCase())
                 .filter(p -> p.getClienteId().equals(request.getIdUser()))
                 // Mismo error si no existe o es de otro cliente: no se revela qué solicitudes existen
