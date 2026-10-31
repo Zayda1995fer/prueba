@@ -5,7 +5,9 @@ import com.fasterxml.jackson.databind.deser.std.StringDeserializer;
 import com.proyecto.servicios.validation.ContrasenaSegura;
 import jakarta.validation.constraints.DecimalMax;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
+import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.PositiveOrZero;
 import jakarta.validation.constraints.Size;
 import lombok.Getter;
@@ -19,6 +21,10 @@ import static com.proyecto.servicios.validation.ReglasValidacion.USUARIO;
 @Setter
 @NoArgsConstructor
 public class LoginRegistroRequest {
+
+    @NotNull(message = "El id del cliente es obligatorio")
+    @Positive(message = "El id del cliente debe ser un número positivo")
+    private Integer idCliente;
 
     @NotBlank(message = "El usuario es obligatorio")
     @Size(min = 4, max = 50, message = "El usuario debe tener entre 4 y 50 caracteres")

@@ -133,7 +133,7 @@ class PagoServiceImplTest {
         when(transacciones.registrarResultado(7, exito, false)).thenReturn(confirmado);
         cuentaConSaldo("1650.00");
 
-        PagoResponse response = servicio.pagar(request());
+        PagoResponse response = servicio.pagar(request(), 5);
 
         assertThat(response.getEstatus()).isEqualTo("EXITOSO");
         assertThat(response.getFolioTransaccion()).isEqualTo("FOL-1");
@@ -158,7 +158,7 @@ class PagoServiceImplTest {
         when(transacciones.registrarResultado(7, duda, false)).thenReturn(pago(Pago.ESTATUS_POR_CONCILIAR));
         cuentaConSaldo("1650.00");
 
-        PagoResponse response = servicio.pagar(request());
+        PagoResponse response = servicio.pagar(request(), 5);
 
         assertThat(response.getEstatus()).isEqualTo("POR_CONCILIAR");
         assertThat(response.getFolioTransaccion()).isNull();
@@ -175,11 +175,27 @@ class PagoServiceImplTest {
         rechazado.setCodigoRespuesta("5");
         when(transacciones.registrarResultado(7, rechazo, false)).thenReturn(rechazado);
 
-        assertThatThrownBy(() -> servicio.pagar(request()))
+        assertThatThrownBy(() -> servicio.pagar(request(), 5))
                 .isInstanceOfSatisfying(NegocioException.class, ex -> {
                     assertThat(ex.getError()).isEqualTo(CatalogoError.PAGO_RECHAZADO);
                     assertThat(ex.getMessage()).contains("código 5");
                 });
+    }
+
+    @Test
+    void pagar_conSesionDeOtroCliente_seRechazaSinValidarNiReservarNiLlamarAlProveedor() {
+        assertError(() -> servicio.pagar(request(), 6), CatalogoError.OPERACION_NO_AUTORIZADA);
+        verifyNoInteractions(validador, transacciones, gateway);
+    }
+
+    @Test
+    void consultarPago_conSesionDeOtroCliente_seRechaza() {
+        PagoConsultaRequest request = new PagoConsultaRequest();
+        request.setIdSolicitud(ID_SOLICITUD);
+        request.setIdUser(5);
+
+        assertError(() -> servicio.consultarPago(request, 6), CatalogoError.OPERACION_NO_AUTORIZADA);
+        verifyNoInteractions(pagoRepository);
     }
 
     @Test
@@ -190,7 +206,7 @@ class PagoServiceImplTest {
         when(gateway.enviarPago(any(), any())).thenReturn(sinToken);
         when(transacciones.registrarResultado(7, sinToken, false)).thenReturn(pago(Pago.ESTATUS_RECHAZADO));
 
-        assertError(() -> servicio.pagar(request()), CatalogoError.GESTOPAGO_SIN_TOKEN);
+        assertError(() -> servicio.pagar(request(), 5), CatalogoError.GESTOPAGO_SIN_TOKEN);
     }
 
     @Test
@@ -201,7 +217,7 @@ class PagoServiceImplTest {
         when(transacciones.reservar(any(), any())).thenReturn(new Reserva(confirmado, true));
         cuentaConSaldo("1650.00");
 
-        PagoResponse response = servicio.pagar(request());
+        PagoResponse response = servicio.pagar(request(), 5);
 
         assertThat(response.getEstatus()).isEqualTo("EXITOSO");
         verifyNoInteractions(gateway);
@@ -215,7 +231,7 @@ class PagoServiceImplTest {
         rechazado.setCodigoRespuesta("5");
         when(transacciones.reservar(any(), any())).thenReturn(new Reserva(rechazado, true));
 
-        assertError(() -> servicio.pagar(request()), CatalogoError.PAGO_RECHAZADO);
+        assertError(() -> servicio.pagar(request(), 5), CatalogoError.PAGO_RECHAZADO);
         verifyNoInteractions(gateway);
     }
 
@@ -225,7 +241,7 @@ class PagoServiceImplTest {
         when(transacciones.reservar(any(), any())).thenReturn(new Reserva(pago(Pago.ESTATUS_PENDIENTE), true));
         cuentaConSaldo("1650.00");
 
-        assertThat(servicio.pagar(request()).getEstatus()).isEqualTo("POR_CONCILIAR");
+        assertThat(servicio.pagar(request(), 5).getEstatus()).isEqualTo("POR_CONCILIAR");
     }
 
     @Test
@@ -233,7 +249,7 @@ class PagoServiceImplTest {
         when(validador.validar(any(PagoRequest.class)))
                 .thenThrow(new NegocioException(CatalogoError.MONTO_FUERA_DE_RANGO, "10", "100"));
 
-        assertError(() -> servicio.pagar(request()), CatalogoError.MONTO_FUERA_DE_RANGO);
+        assertError(() -> servicio.pagar(request(), 5), CatalogoError.MONTO_FUERA_DE_RANGO);
         verifyNoInteractions(transacciones, gateway);
     }
 
@@ -242,7 +258,7 @@ class PagoServiceImplTest {
         validacionOk();
         when(transacciones.reservar(any(), any())).thenThrow(new NegocioException(CatalogoError.SALDO_INSUFICIENTE));
 
-        assertError(() -> servicio.pagar(request()), CatalogoError.SALDO_INSUFICIENTE);
+        assertError(() -> servicio.pagar(request(), 5), CatalogoError.SALDO_INSUFICIENTE);
         verifyNoInteractions(gateway);
     }
 
@@ -260,7 +276,7 @@ class PagoServiceImplTest {
         request.setIdSolicitud(ID_SOLICITUD.toUpperCase());
         request.setIdUser(5);
 
-        PagoResponse response = servicio.consultarPago(request);
+        PagoResponse response = servicio.consultarPago(request, request.getIdUser());
 
         assertThat(response.getEstatus()).isEqualTo("EXITOSO");
         assertThat(response.getFolioTransaccion()).isEqualTo("FOL-1");
@@ -273,7 +289,7 @@ class PagoServiceImplTest {
         request.setIdSolicitud(ID_SOLICITUD);
         request.setIdUser(99);
 
-        assertError(() -> servicio.consultarPago(request), CatalogoError.PAGO_NO_ENCONTRADO);
+        assertError(() -> servicio.consultarPago(request, request.getIdUser()), CatalogoError.PAGO_NO_ENCONTRADO);
     }
 
     @Test
@@ -283,6 +299,6 @@ class PagoServiceImplTest {
         request.setIdSolicitud(ID_SOLICITUD);
         request.setIdUser(5);
 
-        assertError(() -> servicio.consultarPago(request), CatalogoError.PAGO_NO_ENCONTRADO);
+        assertError(() -> servicio.consultarPago(request, request.getIdUser()), CatalogoError.PAGO_NO_ENCONTRADO);
     }
 }

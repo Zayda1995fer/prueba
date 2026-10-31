@@ -20,8 +20,7 @@ public interface CuentaRepository extends JpaRepository<Cuenta, Integer> {
 
     boolean existsByNumeroCuenta(String numeroCuenta);
 
-    // "Consultar cuentas activas"
-    List<Cuenta> findByEstatus(String estatus);
+    List<Cuenta> findByClienteIdAndEstatus(Integer clienteId, String estatus);
 
     // Con bloqueo de escritura: los pagos simultáneos de una misma cuenta se atienden uno por uno,
     // así dos solicitudes no pueden gastar el mismo saldo.

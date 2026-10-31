@@ -7,8 +7,8 @@ import com.proyecto.servicios.model.onboarding.PagoResponse;
 public interface PagoService {
 
     /** Realiza el pago completo. EXITOSO si el proveedor lo confirmó; POR_CONCILIAR si aún no se sabe. */
-    PagoResponse pagar(PagoRequest request);
+    PagoResponse pagar(PagoRequest request, Integer clienteAutenticado);
 
     /** Estado actual de un pago del cliente, por su id de solicitud. */
-    PagoResponse consultarPago(PagoConsultaRequest request);
+    PagoResponse consultarPago(PagoConsultaRequest request, Integer clienteAutenticado);
 }
