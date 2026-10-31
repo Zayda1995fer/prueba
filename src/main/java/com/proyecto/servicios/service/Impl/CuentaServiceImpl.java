@@ -23,25 +23,27 @@ public class CuentaServiceImpl implements CuentaService {
     }
 
     @Override
-    public CuentaResponse consultarPorNumeroCuenta(String numeroCuenta) {
-        Cuenta cuenta = obtenerCuentaOLanzar(numeroCuenta);
+    public CuentaResponse consultarPorNumeroCuenta(String numeroCuenta, Integer clienteAutenticado) {
+        Cuenta cuenta = obtenerCuentaDelCliente(numeroCuenta, clienteAutenticado);
         return ClienteServiceImpl.mapearCuenta(cuenta);
     }
 
     @Override
-    public List<CuentaResponse> consultarActivas() {
-        return cuentaRepository.findByEstatus(Cuenta.ESTATUS_ACTIVA).stream()
+    public List<CuentaResponse> consultarActivas(Integer clienteAutenticado) {
+        return cuentaRepository.findByClienteIdAndEstatus(clienteAutenticado, Cuenta.ESTATUS_ACTIVA).stream()
                 .map(ClienteServiceImpl::mapearCuenta)
                 .toList();
     }
 
     @Override
-    public BigDecimal consultarSaldo(String numeroCuenta) {
-        return obtenerCuentaOLanzar(numeroCuenta).getSaldo();
+    public BigDecimal consultarSaldo(String numeroCuenta, Integer clienteAutenticado) {
+        return obtenerCuentaDelCliente(numeroCuenta, clienteAutenticado).getSaldo();
     }
 
-    private Cuenta obtenerCuentaOLanzar(String numeroCuenta) {
+    // Mismo error si no existe o es de otro cliente: no se revela qué números de cuenta existen
+    private Cuenta obtenerCuentaDelCliente(String numeroCuenta, Integer clienteAutenticado) {
         return cuentaRepository.findByNumeroCuenta(numeroCuenta)
+                .filter(c -> c.getClienteId().equals(clienteAutenticado))
                 .orElseThrow(() -> new NegocioException(CatalogoError.CUENTA_NO_ENCONTRADA, numeroCuenta));
     }
 }

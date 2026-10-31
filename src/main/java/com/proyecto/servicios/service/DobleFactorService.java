@@ -7,7 +7,7 @@ import com.proyecto.servicios.model.onboarding.Codigo2faResponse;
 public interface DobleFactorService {
 
     /** Genera un código nuevo e invalida los anteriores de esa cuenta. */
-    Codigo2faResponse solicitar(Codigo2faRequest request);
+    Codigo2faResponse solicitar(Codigo2faRequest request, Integer clienteAutenticado);
 
     /** Valida y consume el código; lanza NegocioException si no es válido. */
     void validar(Integer clienteId, Integer cuentaId, String codigo);
