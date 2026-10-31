@@ -444,6 +444,7 @@ class ValidacionRequestsTest {
 
     private static LoginRegistroRequest accesoValido() {
         LoginRegistroRequest r = new LoginRegistroRequest();
+        r.setIdCliente(10);
         r.setUsuario("juan.perez_01");
         r.setContrasena("Qx7#mLp2vZ");
         return r;
